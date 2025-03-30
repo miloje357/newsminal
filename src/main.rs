@@ -1,3 +1,5 @@
+mod printer;
+
 use std::{
     io::{self, stdout, Write},
     thread,
@@ -7,7 +9,6 @@ use std::{
 use crossterm::{
     cursor,
     event::{poll, read, Event, KeyCode, KeyEventKind},
-    style,
     terminal::{self, ClearType},
     QueueableCommand,
 };
@@ -19,17 +20,10 @@ fn main() -> io::Result<()> {
         .queue(cursor::Hide)?
         .queue(terminal::Clear(ClearType::All))?;
 
-    let (w, h) = terminal::size()?;
-    let square_side = 10;
-    for y in (h - square_side) / 2..(h + square_side) / 2 {
-        for x in ((w - square_side * 2) / 2..(w + square_side * 2) / 2).step_by(2) {
-            if (x / 2 + y) % 2 == 0 {
-                stdout
-                    .queue(cursor::MoveTo(x, y))?
-                    .queue(style::Print("██"))?;
-            }
-        }
-    }
+    let lorem_ipsum = "Rem est et dolorum est enim corporis corporis. Voluptas excepturi cum veniam. Fuga ab tempore quis velit. Reiciendis dolorem occaecati accusamus animi. Impedit voluptatem tempore temporibus in voluptatem a eum nihil.";
+
+    stdout.queue(cursor::MoveTo(1, 1))?;
+    printer::print_wrapping(&mut stdout, lorem_ipsum, 30)?;
     stdout.flush()?;
 
     let mut quit = false;
