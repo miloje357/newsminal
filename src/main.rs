@@ -1,7 +1,10 @@
-mod printer;
+mod frontend;
+
+use frontend::{Article, Component, Paragraph};
 
 use std::{
-    io::{self, stdout, Write},
+    error::Error,
+    io::{stdout, Write},
     thread,
     time::Duration,
 };
@@ -13,29 +16,43 @@ use crossterm::{
     QueueableCommand,
 };
 
-fn main() -> io::Result<()> {
+fn main() -> Result<(), Box<dyn Error>> {
     terminal::enable_raw_mode()?;
     let mut stdout = stdout();
     stdout
         .queue(cursor::Hide)?
         .queue(terminal::Clear(ClearType::All))?;
 
+    let (_, h) = terminal::size()?;
+
     let lorem_ipsum = "Rem est et dolorum est enim corporis corporis. Voluptas excepturi cum veniam. Fuga ab tempore quis velit. Reiciendis dolorem occaecati accusamus animi. Impedit voluptatem tempore temporibus in voluptatem a eum nihil.";
 
-    stdout.queue(cursor::MoveTo(1, 1))?;
-    printer::print_wrapping(&mut stdout, lorem_ipsum, 30)?;
+    let article = Article::new(
+        vec![
+            Paragraph::build(lorem_ipsum)?,
+            Paragraph::build(lorem_ipsum)?,
+            Paragraph::build(lorem_ipsum)?,
+            Paragraph::build(lorem_ipsum)?,
+            Paragraph::build(lorem_ipsum)?,
+            Paragraph::build(lorem_ipsum)?,
+        ],
+        h as usize,
+    )?;
+
+    article.draw(&mut stdout)?;
     stdout.flush()?;
 
     let mut quit = false;
     while !quit {
         if poll(Duration::ZERO)? {
+            // TODO: Add keyboard scrolling
+            // TODO: Add mouse scrolling
             if let Event::Key(event) = read()? {
                 if event.kind == KeyEventKind::Press && event.code == KeyCode::Char('q') {
                     quit = true;
                 }
             }
         }
-        // stdout.flush()?;
         thread::sleep(Duration::from_millis(16));
     }
     stdout
