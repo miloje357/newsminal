@@ -1,12 +1,10 @@
 use std::{
     fmt,
     io::{self, Write},
-    str,
 };
 
-use crossterm::{cursor, style, Command, QueueableCommand};
+use crossterm::{cursor, Command, QueueableCommand};
 
-// TODO: Deal with width
 pub struct Article {
     content: Vec<String>,
     first: usize,
@@ -37,10 +35,26 @@ impl Article {
     // TODO: change_dimens
 }
 
+fn wrap_text(text: &str, width: usize) -> Result<Vec<String>, fmt::Error> {
+    let mut res = Vec::new();
+    let mut buf = String::new();
+    for word in text.split(" ") {
+        if buf.len() + word.len() >= width {
+            buf.pop();
+            res.push(buf.clone());
+            buf.clear();
+        }
+        buf.push_str(word);
+        buf.push(' ');
+    }
+    res.push(buf.trim_end().to_string());
+    Ok(res)
+}
+
 pub trait Component {
     // NOTE: To implement scrolling correctly you must not use cursor::Move commands
     // TODO: Add an assert command to check the above note
-    fn build(text: &str) -> Result<Vec<String>, fmt::Error>;
+    fn build(text: &str, width: usize) -> Result<Vec<String>, fmt::Error>;
 
     fn push(dest: &mut Vec<String>, src: impl Command) -> fmt::Result {
         let mut line = String::new();
@@ -50,42 +64,54 @@ pub trait Component {
     }
 }
 
-// TODO: Deal with width
+macro_rules! body {
+    ($width:expr, $($type:ident($text:expr)),*) => {
+        vec![
+            $(
+                $type::build($text, ($width) as usize)?,
+            )*
+        ]
+    };
+}
+
 pub struct Paragraph;
 
 impl Component for Paragraph {
-    fn build(text: &str) -> Result<Vec<String>, fmt::Error> {
-        const WIDTH: usize = 30;
+    fn build(text: &str, width: usize) -> Result<Vec<String>, fmt::Error> {
         const IDENT: usize = 4;
         let mut res = vec![String::new()];
-        let mut buf = String::from(" ".repeat(IDENT));
-        for word in text.split_whitespace() {
-            if buf.len() + word.len() >= WIDTH {
-                buf.pop();
-                Self::push(&mut res, style::Print(&buf)).unwrap();
-                buf.clear();
-            }
-            buf.push_str(word);
-            buf.push(' ');
-        }
-        Self::push(&mut res, style::Print(&buf.trim_end())).unwrap();
+        let text = " ".repeat(IDENT) + text;
+        res.append(&mut wrap_text(&text, width)?);
         Ok(res)
     }
 }
 
 #[cfg(test)]
-mod paragraph_tests {
-    use super::{Component, Paragraph};
+mod text_wrap_tests {
+    use super::wrap_text;
 
     #[test]
-    fn test_one_word_paragraph() {
-        let right = vec!["", "    TEST"];
-        assert_eq!(Paragraph::build("TEST").unwrap(), right);
+    fn one_word() {
+        let right = vec!["TEST"];
+        assert_eq!(wrap_text("TEST", 10).unwrap(), right);
     }
 
     #[test]
-    fn test_empty_paragraph() {
-        let right = vec!["", ""];
-        assert_eq!(Paragraph::build("").unwrap(), right);
+    fn empty_line() {
+        let right = vec![""];
+        assert_eq!(wrap_text("", 10).unwrap(), right);
+    }
+
+    #[test]
+    fn two_line() {
+        let right = vec!["TEST", "TEST"];
+        assert_eq!(wrap_text("TEST TEST", 5).unwrap(), right);
+    }
+
+    // TODO: Figure out how to warn if text couldn't wrap
+    #[test]
+    fn too_short() {
+        let right = vec!["TEST", "TEST"];
+        assert_eq!(wrap_text("TEST TEST", 3).unwrap(), right);
     }
 }

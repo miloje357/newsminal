@@ -1,6 +1,7 @@
+#[macro_use]
 mod frontend;
 
-use frontend::{Article, Component, Paragraph};
+use frontend::*;
 
 use std::{
     error::Error,
@@ -23,19 +24,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         .queue(cursor::Hide)?
         .queue(terminal::Clear(ClearType::All))?;
 
-    let (_, h) = terminal::size()?;
+    let (w, h) = terminal::size()?;
 
     let lorem_ipsum = "Rem est et dolorum est enim corporis corporis. Voluptas excepturi cum veniam. Fuga ab tempore quis velit. Reiciendis dolorem occaecati accusamus animi. Impedit voluptatem tempore temporibus in voluptatem a eum nihil.";
 
     let article = Article::new(
-        vec![
-            Paragraph::build(lorem_ipsum)?,
-            Paragraph::build(lorem_ipsum)?,
-            Paragraph::build(lorem_ipsum)?,
-            Paragraph::build(lorem_ipsum)?,
-            Paragraph::build(lorem_ipsum)?,
-            Paragraph::build(lorem_ipsum)?,
-        ],
+        body!(
+            w / 2,
+            Paragraph(lorem_ipsum),
+            Paragraph(lorem_ipsum),
+            Paragraph(lorem_ipsum)
+        ),
         h as usize,
     )?;
 
