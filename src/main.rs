@@ -12,15 +12,55 @@ use std::{
 
 use crossterm::{
     cursor,
-    event::{poll, read, Event, KeyCode, KeyEventKind},
+    event::{self, poll, read, Event, KeyCode, KeyEventKind, KeyModifiers},
     terminal::{self, ClearType},
     QueueableCommand,
 };
+
+enum Control {
+    Quit,
+    ScrollUp,
+    ScrollDown,
+}
+
+fn handle_input(event: Event) -> Option<Control> {
+    match event {
+        Event::Key(event) => {
+            if event.kind == KeyEventKind::Press {
+                match event.code {
+                    KeyCode::Char(c) => {
+                        if event.modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
+                            return Some(Control::Quit);
+                        }
+                        match c {
+                            'k' => return Some(Control::ScrollDown),
+                            'j' => return Some(Control::ScrollUp),
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // TODO: Add mouse scrolling
+        Event::Mouse(event) => match event.kind {
+            /*
+            MouseEventKind::ScrollUp => return Some(Control::ScrollDown),
+            MouseEventKind::ScrollDown => return Some(Control::ScrollUp),
+            */
+            _ => {}
+        },
+        _ => {}
+    }
+    None
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     terminal::enable_raw_mode()?;
     let mut stdout = stdout();
     stdout
+        .queue(event::EnableMouseCapture)?
+        .queue(terminal::EnterAlternateScreen)?
         .queue(cursor::Hide)?
         .queue(terminal::Clear(ClearType::All))?;
 
@@ -28,14 +68,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let lorem_ipsum = "Rem est et dolorum est enim corporis corporis. Voluptas excepturi cum veniam. Fuga ab tempore quis velit. Reiciendis dolorem occaecati accusamus animi. Impedit voluptatem tempore temporibus in voluptatem a eum nihil.";
 
-    let article = Article::new(
+    let mut article = Article::new(
         body!(
-            w / 2,
+            w / 4,
+            Paragraph(lorem_ipsum),
+            Paragraph(lorem_ipsum),
+            Paragraph(lorem_ipsum),
             Paragraph(lorem_ipsum),
             Paragraph(lorem_ipsum),
             Paragraph(lorem_ipsum)
         ),
-        h as usize,
+        h,
     )?;
 
     article.draw(&mut stdout)?;
@@ -44,17 +87,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut quit = false;
     while !quit {
         if poll(Duration::ZERO)? {
-            // TODO: Add keyboard scrolling
-            // TODO: Add mouse scrolling
-            if let Event::Key(event) = read()? {
-                if event.kind == KeyEventKind::Press && event.code == KeyCode::Char('q') {
-                    quit = true;
+            match handle_input(read()?) {
+                Some(Control::Quit) => quit = true,
+                Some(Control::ScrollUp) => {
+                    article.scroll_up(&mut stdout)?;
+                    stdout.flush()?;
                 }
+                Some(Control::ScrollDown) => {
+                    article.scroll_down(&mut stdout)?;
+                    stdout.flush()?;
+                }
+                None => {}
             }
         }
         thread::sleep(Duration::from_millis(16));
     }
     stdout
+        .queue(event::DisableMouseCapture)?
+        .queue(terminal::LeaveAlternateScreen)?
         .queue(terminal::Clear(ClearType::All))?
         .queue(cursor::Show)?
         .queue(cursor::MoveTo(0, 0))?;
