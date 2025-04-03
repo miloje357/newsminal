@@ -19,6 +19,7 @@ use crossterm::{
 
 enum Control {
     Quit,
+    Resize(u16, u16),
     ScrollUp,
     ScrollDown,
 }
@@ -35,6 +36,7 @@ fn handle_input(event: Event) -> Option<Control> {
                         match c {
                             'k' => return Some(Control::ScrollDown),
                             'j' => return Some(Control::ScrollUp),
+                            'q' => return Some(Control::Quit),
                             _ => {}
                         }
                     }
@@ -42,6 +44,7 @@ fn handle_input(event: Event) -> Option<Control> {
                 }
             }
         }
+        Event::Resize(nw, nh) => return Some(Control::Resize(nw, nh)),
         // TODO: Add mouse scrolling
         Event::Mouse(event) => match event.kind {
             /*
@@ -79,6 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Paragraph(lorem_ipsum)
         ),
         h,
+        w,
     )?;
 
     article.draw(&mut stdout)?;
@@ -95,6 +99,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Some(Control::ScrollDown) => {
                     article.scroll_down(&mut stdout)?;
+                    stdout.flush()?;
+                }
+                Some(Control::Resize(nw, nh)) => {
+                    article.resize(nw, nh)?;
+                    article.draw(&mut stdout)?;
                     stdout.flush()?;
                 }
                 None => {}
