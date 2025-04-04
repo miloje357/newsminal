@@ -1,21 +1,33 @@
-use std::{
-    fmt,
-    io::{self, Write},
-};
+use std::io::{self, Write};
 
-use crossterm::{Command, QueueableCommand, cursor, style::Stylize, terminal};
+use crossterm::{QueueableCommand, cursor, style::Stylize, terminal};
 
-pub struct Article {
+pub enum Components {
+    Paragraph(String),
+    Title(String),
+}
+
+pub fn build_article(components: Vec<Components>, width: usize) -> Vec<String> {
+    components
+        .iter()
+        .flat_map(|comp| match comp {
+            Components::Paragraph(text) => Paragraph::build(&text, width),
+            Components::Title(text) => Title::build(&text, width),
+        })
+        .collect()
+}
+
+pub struct TextPad {
     content: Vec<String>,
     first: u16,
     height: u16,
     width: u16,
 }
 
-impl Article {
-    pub fn new(content: Vec<Vec<String>>, height: u16, width: u16) -> io::Result<Self> {
+impl TextPad {
+    pub fn new(content: Vec<String>, height: u16, width: u16) -> io::Result<Self> {
         Ok(Self {
-            content: content.into_iter().flatten().collect(),
+            content,
             first: 0,
             height,
             width,
@@ -62,7 +74,7 @@ impl Article {
     }
 }
 
-fn wrap_text(text: &str, width: usize) -> Result<Vec<String>, fmt::Error> {
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
     let mut res = Vec::new();
     let mut buf = String::new();
     for word in text.split(" ") {
@@ -75,49 +87,33 @@ fn wrap_text(text: &str, width: usize) -> Result<Vec<String>, fmt::Error> {
         buf.push(' ');
     }
     res.push(buf.trim_end().to_string());
-    Ok(res)
+    res
 }
 
 pub trait Component {
     // NOTE: To implement scrolling correctly you must not use cursor::Move commands
     // TODO: Add an assert command to check the above note
-    fn build(text: &str, width: usize) -> Result<Vec<String>, fmt::Error>;
-}
-
-macro_rules! comp {
-    ($width:expr, $($type:ident($text:expr)),*) => {
-        vec![
-            $(
-                $type::build($text, ($width) as usize)?,
-            )*
-        ]
-    };
+    fn build(text: &str, width: usize) -> Vec<String>;
 }
 
 pub struct Paragraph;
-
 impl Component for Paragraph {
-    fn build(text: &str, width: usize) -> Result<Vec<String>, fmt::Error> {
+    fn build(text: &str, width: usize) -> Vec<String> {
         const IDENT: usize = 4;
         let mut res = vec![String::new()];
-        let text = " ".repeat(IDENT) + text;
-        res.append(&mut wrap_text(&text, width)?);
-        Ok(res)
+        let text = " ".repeat(IDENT) + text.trim();
+        res.append(&mut wrap_text(&text, width));
+        res
     }
 }
 
 pub struct Title;
-
 impl Component for Title {
-    fn build(text: &str, width: usize) -> Result<Vec<String>, fmt::Error> {
-        const IDENT: usize = 4;
-        let mut res = vec![String::new()];
-        let text = " ".repeat(IDENT) + text;
-        res.append(&mut wrap_text(&text, width)?);
-        Ok(res
+    fn build(text: &str, width: usize) -> Vec<String> {
+        Paragraph::build(text, width)
             .iter()
             .map(|line| line.clone().bold().to_string())
-            .collect())
+            .collect()
     }
 }
 
@@ -132,25 +128,27 @@ mod text_wrap_tests {
     #[test]
     fn one_word() {
         let right = vec!["TEST"];
-        assert_eq!(wrap_text("TEST", 10).unwrap(), right);
+        assert_eq!(wrap_text("TEST", 10), right);
     }
 
     #[test]
     fn empty_line() {
         let right = vec![""];
-        assert_eq!(wrap_text("", 10).unwrap(), right);
+        assert_eq!(wrap_text("", 10), right);
     }
 
     #[test]
     fn two_line() {
         let right = vec!["TEST", "TEST"];
-        assert_eq!(wrap_text("TEST TEST", 5).unwrap(), right);
+        assert_eq!(wrap_text("TEST TEST", 5), right);
     }
 
     // TODO: Figure out how to warn if text couldn't wrap
     #[test]
     fn too_short() {
         let right = vec!["TEST", "TEST"];
-        assert_eq!(wrap_text("TEST TEST", 3).unwrap(), right);
+        assert_eq!(wrap_text("TEST TEST", 3), right);
     }
 }
+
+// TODO: Write more tests

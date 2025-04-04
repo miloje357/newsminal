@@ -1,19 +1,20 @@
-#[macro_use]
+mod backend;
 mod frontend;
 
+use backend::get_article;
 use frontend::*;
 
 use std::{
-    error::Error,
-    fs,
-    io::{Write, stdout},
-    thread,
+    env,
+    io::{self, Write, stdout},
+    process, thread,
     time::Duration,
 };
 
 use crossterm::{
     QueueableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, poll, read},
+    execute,
     terminal::{self, ClearType},
 };
 
@@ -24,10 +25,11 @@ enum Control {
     ScrollDown,
 }
 
-fn handle_input(event: Event) -> Option<Control> {
+fn map_input(event: Event) -> Option<Control> {
     match event {
         Event::Key(event) => {
             if event.kind == KeyEventKind::Press {
+                // TODO: Add arrows for control
                 match event.code {
                     KeyCode::Char(c) => {
                         if event.modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
@@ -58,28 +60,44 @@ fn handle_input(event: Event) -> Option<Control> {
     None
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    terminal::enable_raw_mode()?;
-    let mut stdout = stdout();
-    stdout
-        .queue(event::EnableMouseCapture)?
-        .queue(terminal::EnterAlternateScreen)?
-        .queue(cursor::Hide)?
-        .queue(terminal::Clear(ClearType::All))?;
+struct ScreenState;
 
+impl ScreenState {
+    fn enable() -> io::Result<Self> {
+        terminal::enable_raw_mode()?;
+        stdout()
+            .queue(event::EnableMouseCapture)?
+            .queue(terminal::EnterAlternateScreen)?
+            .queue(cursor::Hide)?
+            .queue(terminal::Clear(ClearType::All))?;
+        Ok(Self)
+    }
+}
+
+impl Drop for ScreenState {
+    fn drop(&mut self) {
+        let _ = execute!(
+            stdout(),
+            event::DisableMouseCapture,
+            terminal::LeaveAlternateScreen,
+            terminal::Clear(ClearType::All),
+            cursor::Show,
+            cursor::MoveTo(0, 0)
+        )
+        .unwrap_or_else(|err| eprintln!("Display error: {err}"));
+        terminal::disable_raw_mode()
+            .unwrap_or_else(|err| eprintln!("Couldn't leave raw mode {err}"));
+    }
+}
+
+fn run(article: Vec<Components>) -> io::Result<()> {
+    let _screen_state = ScreenState::enable()?;
+    let mut stdout = stdout();
     let (w, h) = terminal::size()?;
 
-    let lorem_ipsum = fs::read_to_string("lorem_ipsum.txt")?;
-    let mut lorem_ipsum = lorem_ipsum.lines();
-    let title = lorem_ipsum.next().unwrap_or("NO TITLE");
-    let paragraphs = lorem_ipsum.skip(1);
-    let mut body = comp!(w / 2, Title(title));
-    body.append(
-        &mut paragraphs
-            .map(|p| Paragraph::build(p, (w / 2) as usize).unwrap_or(vec!["NO PARAGRAPH".into()]))
-            .collect(),
-    );
-    let mut article = Article::new(body, h, w)?;
+    // TODO: Add article geometry configuration
+    let body = build_article(article, (w / 2).into());
+    let mut article = TextPad::new(body, h, w)?;
 
     article.draw(&mut stdout)?;
     stdout.flush()?;
@@ -87,7 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut quit = false;
     while !quit {
         if poll(Duration::ZERO)? {
-            match handle_input(read()?) {
+            match map_input(read()?) {
                 Some(Control::Quit) => quit = true,
                 Some(Control::ScrollUp) => {
                     article.scroll_up(&mut stdout)?;
@@ -107,13 +125,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         thread::sleep(Duration::from_millis(16));
     }
-    stdout
-        .queue(event::DisableMouseCapture)?
-        .queue(terminal::LeaveAlternateScreen)?
-        .queue(terminal::Clear(ClearType::All))?
-        .queue(cursor::Show)?
-        .queue(cursor::MoveTo(0, 0))?;
-    stdout.flush()?;
-    terminal::disable_raw_mode()?;
+
     Ok(())
+}
+
+// TODO: Add the feed
+// TODO: Add a help command
+fn main() {
+    let mut args = env::args();
+    args.next();
+    let url = args.next().unwrap_or_else(|| {
+        eprintln!("Please provide an article url");
+        process::exit(1);
+    });
+
+    let body = get_article(&url).unwrap_or_else(|err| {
+        eprintln!("Couldn't get article: {err}");
+        process::exit(1);
+    });
+
+    run(body).unwrap_or_else(|err| {
+        eprintln!("Display error: {err}");
+        process::exit(1);
+    });
 }
