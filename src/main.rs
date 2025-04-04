@@ -5,16 +5,16 @@ use frontend::*;
 
 use std::{
     error::Error,
-    io::{stdout, Write},
+    fs,
+    io::{Write, stdout},
     thread,
     time::Duration,
 };
 
 use crossterm::{
-    cursor,
-    event::{self, poll, read, Event, KeyCode, KeyEventKind, KeyModifiers},
+    QueueableCommand, cursor,
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, poll, read},
     terminal::{self, ClearType},
-    QueueableCommand,
 };
 
 enum Control {
@@ -69,21 +69,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (w, h) = terminal::size()?;
 
-    let lorem_ipsum = "Rem est et dolorum est enim corporis corporis. Voluptas excepturi cum veniam. Fuga ab tempore quis velit. Reiciendis dolorem occaecati accusamus animi. Impedit voluptatem tempore temporibus in voluptatem a eum nihil.";
-
-    let mut article = Article::new(
-        body!(
-            w / 4,
-            Paragraph(lorem_ipsum),
-            Paragraph(lorem_ipsum),
-            Paragraph(lorem_ipsum),
-            Paragraph(lorem_ipsum),
-            Paragraph(lorem_ipsum),
-            Paragraph(lorem_ipsum)
-        ),
-        h,
-        w,
-    )?;
+    let lorem_ipsum = fs::read_to_string("lorem_ipsum.txt")?;
+    let mut lorem_ipsum = lorem_ipsum.lines();
+    let title = lorem_ipsum.next().unwrap_or("NO TITLE");
+    let paragraphs = lorem_ipsum.skip(1);
+    let mut body = comp!(w / 2, Title(title));
+    body.append(
+        &mut paragraphs
+            .map(|p| Paragraph::build(p, (w / 2) as usize).unwrap_or(vec!["NO PARAGRAPH".into()]))
+            .collect(),
+    );
+    let mut article = Article::new(body, h, w)?;
 
     article.draw(&mut stdout)?;
     stdout.flush()?;

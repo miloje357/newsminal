@@ -3,7 +3,7 @@ use std::{
     io::{self, Write},
 };
 
-use crossterm::{cursor, terminal, Command, QueueableCommand};
+use crossterm::{Command, QueueableCommand, cursor, style::Stylize, terminal};
 
 pub struct Article {
     content: Vec<String>,
@@ -82,16 +82,9 @@ pub trait Component {
     // NOTE: To implement scrolling correctly you must not use cursor::Move commands
     // TODO: Add an assert command to check the above note
     fn build(text: &str, width: usize) -> Result<Vec<String>, fmt::Error>;
-
-    fn push(dest: &mut Vec<String>, src: impl Command) -> fmt::Result {
-        let mut line = String::new();
-        src.write_ansi(&mut line)?;
-        dest.push(line);
-        Ok(())
-    }
 }
 
-macro_rules! body {
+macro_rules! comp {
     ($width:expr, $($type:ident($text:expr)),*) => {
         vec![
             $(
@@ -113,7 +106,21 @@ impl Component for Paragraph {
     }
 }
 
-// TODO: Add the Title component
+pub struct Title;
+
+impl Component for Title {
+    fn build(text: &str, width: usize) -> Result<Vec<String>, fmt::Error> {
+        const IDENT: usize = 4;
+        let mut res = vec![String::new()];
+        let text = " ".repeat(IDENT) + text;
+        res.append(&mut wrap_text(&text, width)?);
+        Ok(res
+            .iter()
+            .map(|line| line.clone().bold().to_string())
+            .collect())
+    }
+}
+
 // TODO: Add the Lead component
 // TODO: Add the List component
 // TODO: Add the Boxed component
