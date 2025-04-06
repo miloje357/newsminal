@@ -1,8 +1,9 @@
-use std::{error::Error, fmt::Display};
-
-use scraper::{Html, Selector};
+mod n1;
 
 use crate::frontend::Components;
+use n1::N1;
+use scraper::Html;
+use std::{error::Error, fmt::Display};
 
 #[derive(Debug)]
 struct NoScraper;
@@ -52,47 +53,6 @@ pub fn get_article(url: &str) -> Result<Vec<Components>, Box<dyn Error>> {
 trait Scraper {
     fn get_domain(&self) -> &str;
     fn get_article(&self, html: Html) -> Result<Vec<Components>, ArticleError>;
-}
-
-struct N1;
-impl Scraper for N1 {
-    fn get_domain(&self) -> &str {
-        "https://n1info.rs/"
-    }
-
-    // TODO: Add consecutive components
-    fn get_article(&self, html: Html) -> Result<Vec<Components>, ArticleError> {
-        let mut article = Vec::new();
-        let title_selector = Selector::parse(".entry-title").unwrap();
-        let title = html
-            .select(&title_selector)
-            .next()
-            .ok_or(ArticleError::NoTitle)?
-            .text()
-            .collect();
-        article.push(Components::Title(title));
-
-        let content_selector = Selector::parse(".entry-content").unwrap();
-        let paragraphs = html
-            .select(&content_selector)
-            .next()
-            .ok_or(ArticleError::NoContent)?
-            .child_elements()
-            .filter(|tag| tag.value().name() == "p")
-            .filter_map(|p| {
-                let text: String = p.text().collect();
-                if text.is_empty() {
-                    return None;
-                }
-                Some(Components::Paragraph(text))
-            });
-        article.extend(paragraphs);
-        if article.len() == 1 {
-            return Err(ArticleError::NoContent);
-        }
-
-        Ok(article)
-    }
 }
 
 // TODO: Add more scrapers

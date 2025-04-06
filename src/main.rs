@@ -1,21 +1,18 @@
 mod backend;
 mod frontend;
 
-use backend::get_article;
-use frontend::*;
-
-use std::{
-    env,
-    io::{self, Write, stdout},
-    process, thread,
-    time::Duration,
-};
-
 use crossterm::{
     QueueableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, poll, read},
     execute,
     terminal::{self, ClearType},
+};
+use frontend::{Components, TextPad};
+use std::{
+    env,
+    io::{self, Write, stdout},
+    process, thread,
+    time::Duration,
 };
 
 enum Control {
@@ -46,6 +43,7 @@ fn map_input(event: Event) -> Option<Control> {
                 }
             }
         }
+        // BUG: Doesn't work
         Event::Resize(nw, nh) => return Some(Control::Resize(nw, nh)),
         // TODO: Add mouse scrolling
         Event::Mouse(event) => match event.kind {
@@ -96,7 +94,7 @@ fn run(article: Vec<Components>) -> io::Result<()> {
     let (w, h) = terminal::size()?;
 
     // TODO: Add article geometry configuration
-    let body = build_article(article, (w / 2).into());
+    let body = frontend::build_article(article, (w / 2).into());
     let mut article = TextPad::new(body, h, w)?;
 
     article.draw(&mut stdout)?;
@@ -139,7 +137,7 @@ fn main() {
         process::exit(1);
     });
 
-    let body = get_article(&url).unwrap_or_else(|err| {
+    let body = backend::get_article(&url).unwrap_or_else(|err| {
         eprintln!("Couldn't get article: {err}");
         process::exit(1);
     });

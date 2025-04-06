@@ -3,16 +3,22 @@ use std::io::{self, Write};
 use crossterm::{QueueableCommand, cursor, style::Stylize, terminal};
 
 pub enum Components {
-    Paragraph(String),
     Title(String),
+    Subtitle(String),
+    Lead(String),
+    Paragraph(String),
+    Boxed(Vec<String>),
 }
 
 pub fn build_article(components: Vec<Components>, width: usize) -> Vec<String> {
     components
         .iter()
         .flat_map(|comp| match comp {
-            Components::Paragraph(text) => Paragraph::build(&text, width),
             Components::Title(text) => Title::build(&text, width),
+            Components::Subtitle(text) => Subtitle::build(&text, width),
+            Components::Lead(text) => Lead::build(&text, width),
+            Components::Paragraph(text) => Paragraph::build(&text, width),
+            Components::Boxed(text) => Boxed::build(&text.join("\n"), width),
         })
         .collect()
 }
@@ -110,6 +116,22 @@ impl Component for Paragraph {
 pub struct Title;
 impl Component for Title {
     fn build(text: &str, width: usize) -> Vec<String> {
+        let mut res = vec![String::new()];
+        let wraped_text = wrap_text(text.trim(), width);
+        let wraped_text = wraped_text.iter().map(|line| {
+            let ident = (width - line.len()) / 2;
+            let ident = " ".repeat(ident);
+            // TODO: Style this better
+            format!("{ident}{}{ident}", line.clone().on_dark_grey().bold())
+        });
+        res.extend(wraped_text);
+        res
+    }
+}
+
+pub struct Lead;
+impl Component for Lead {
+    fn build(text: &str, width: usize) -> Vec<String> {
         Paragraph::build(text, width)
             .iter()
             .map(|line| line.clone().bold().to_string())
@@ -117,38 +139,36 @@ impl Component for Title {
     }
 }
 
-// TODO: Add the Lead component
-// TODO: Add the List component
-// TODO: Add the Boxed component
-
-#[cfg(test)]
-mod text_wrap_tests {
-    use super::wrap_text;
-
-    #[test]
-    fn one_word() {
-        let right = vec!["TEST"];
-        assert_eq!(wrap_text("TEST", 10), right);
-    }
-
-    #[test]
-    fn empty_line() {
-        let right = vec![""];
-        assert_eq!(wrap_text("", 10), right);
-    }
-
-    #[test]
-    fn two_line() {
-        let right = vec!["TEST", "TEST"];
-        assert_eq!(wrap_text("TEST TEST", 5), right);
-    }
-
-    // TODO: Figure out how to warn if text couldn't wrap
-    #[test]
-    fn too_short() {
-        let right = vec!["TEST", "TEST"];
-        assert_eq!(wrap_text("TEST TEST", 3), right);
+pub struct Subtitle;
+impl Component for Subtitle {
+    fn build(text: &str, width: usize) -> Vec<String> {
+        let mut res = vec![String::new()];
+        res.extend(
+            Paragraph::build(text, width)
+                .iter()
+                .map(|line| line.clone().bold().to_string()),
+        );
+        res
     }
 }
 
-// TODO: Write more tests
+pub struct Boxed;
+impl Component for Boxed {
+    fn build(text: &str, width: usize) -> Vec<String> {
+        let mut res = vec![" ".repeat(width).to_string()];
+        res.push(format!(" ┌{}┐ ", "─".repeat(width - 4)));
+        let mut text = text
+            .split("\n")
+            .flat_map(|p| Paragraph::build(p, width - 6))
+            .map(|row| format!(" │ {row}{} │ ", " ".repeat(width - 6 - row.chars().count())));
+        text.next();
+        res.extend(text);
+        res.push(format!(" └{}┘ ", "─".repeat(width - 4)));
+        res
+    }
+}
+
+// TODO: Add the List component
+
+#[cfg(test)]
+mod tests;
