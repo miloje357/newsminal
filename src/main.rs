@@ -1,6 +1,7 @@
 mod backend;
 mod frontend;
 
+use chrono::NaiveDateTime;
 use crossterm::{
     QueueableCommand, cursor,
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, poll, read},
@@ -9,7 +10,6 @@ use crossterm::{
 };
 use frontend::{Components, TextPad};
 use std::{
-    env,
     io::{self, Write, stdout},
     process, thread,
     time::Duration,
@@ -20,6 +20,17 @@ enum Control {
     Resize(u16, u16),
     ScrollUp,
     ScrollDown,
+}
+
+struct FeedItem {
+    url: Option<String>,
+    title: String,
+    published: Option<NaiveDateTime>,
+}
+
+pub struct Feed {
+    time: NaiveDateTime,
+    items: Vec<FeedItem>,
 }
 
 fn map_input(event: Event) -> Option<Control> {
@@ -88,13 +99,13 @@ impl Drop for ScreenState {
     }
 }
 
-fn run(article: Vec<Components>) -> io::Result<()> {
+fn run(feed: Vec<Components>) -> io::Result<()> {
     let _screen_state = ScreenState::enable()?;
     let mut stdout = stdout();
     let (w, h) = terminal::size()?;
 
     // TODO: Add article geometry configuration
-    let body = frontend::build_article(article, (w / 2).into());
+    let body = frontend::build_componenets(feed, (w / 2).into());
     let mut article = TextPad::new(body, h, w)?;
 
     article.draw(&mut stdout)?;
@@ -130,19 +141,14 @@ fn run(article: Vec<Components>) -> io::Result<()> {
 // TODO: Add the feed
 // TODO: Add a help command
 fn main() {
-    let mut args = env::args();
-    args.next();
-    let url = args.next().unwrap_or_else(|| {
-        eprintln!("Please provide an article url");
-        process::exit(1);
-    });
+    let feed = Feed::new()
+        .unwrap_or_else(|err| {
+            eprintln!("Couldn't get feed: {err}");
+            process::exit(1);
+        })
+        .build();
 
-    let body = backend::get_article(&url).unwrap_or_else(|err| {
-        eprintln!("Couldn't get article: {err}");
-        process::exit(1);
-    });
-
-    run(body).unwrap_or_else(|err| {
+    run(feed).unwrap_or_else(|err| {
         eprintln!("Display error: {err}");
         process::exit(1);
     });

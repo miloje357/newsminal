@@ -1,5 +1,6 @@
-use super::{ArticleError, Scraper};
+use super::{ArticleError, FeedItem, Scraper};
 use crate::frontend::Components;
+use chrono::NaiveDateTime;
 use scraper::{Html, Selector};
 
 pub struct N1;
@@ -8,7 +9,11 @@ impl Scraper for N1 {
         "https://n1info.rs/"
     }
 
-    fn get_article(&self, html: Html) -> Result<Vec<Components>, ArticleError> {
+    fn get_feed_url(&self, page: usize) -> String {
+        format!("{}najnovije/page/{}", self.get_domain(), page + 1)
+    }
+
+    fn parse_article(&self, html: Html) -> Result<Vec<Components>, ArticleError> {
         const TITLE_SELCTOR: &str = ".entry-title";
         const CONTENT_SELECTOR: &str = ".entry-content";
         let mut article = Vec::new();
@@ -71,5 +76,37 @@ impl Scraper for N1 {
         }
 
         Ok(article)
+    }
+
+    // TODO: Error handling
+    fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, ArticleError> {
+        let article_selector = Selector::parse("article").unwrap();
+        let link_selector = Selector::parse("a").unwrap();
+        let title_selector = Selector::parse("h3").unwrap();
+        const TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
+        let time_selector = Selector::parse("time").unwrap();
+        Ok(html
+            .select(&article_selector)
+            .filter_map(|a| {
+                let url = a.select(&link_selector).next()?.attr("href")?.to_string();
+                let title = a
+                    .select(&title_selector)
+                    .next()?
+                    .text()
+                    .collect::<String>()
+                    .trim()
+                    .to_string();
+                let published = a
+                    .select(&time_selector)
+                    .next()
+                    .and_then(|el| el.attr("datetime"))
+                    .and_then(|dt| NaiveDateTime::parse_from_str(dt, TIME_FORMAT).ok())?;
+                Some(FeedItem {
+                    url: Some(url),
+                    title,
+                    published: Some(published),
+                })
+            })
+            .collect())
     }
 }

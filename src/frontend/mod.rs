@@ -2,6 +2,8 @@ use std::io::{self, Write};
 
 use crossterm::{QueueableCommand, cursor, style::Stylize, terminal};
 
+use crate::{Feed, FeedItem};
+
 pub enum Components {
     Title(String),
     Subtitle(String),
@@ -10,7 +12,7 @@ pub enum Components {
     Boxed(Vec<String>),
 }
 
-pub fn build_article(components: Vec<Components>, width: usize) -> Vec<String> {
+pub fn build_componenets(components: Vec<Components>, width: usize) -> Vec<String> {
     components
         .iter()
         .flat_map(|comp| match comp {
@@ -165,6 +167,22 @@ impl Component for Boxed {
         res.extend(text);
         res.push(format!(" └{}┘ ", "─".repeat(width - 4)));
         res
+    }
+}
+
+impl FeedItem {
+    pub fn build(&self) -> Components {
+        let mut rows = vec![self.title.clone()];
+        if let Some(dt) = self.published {
+            rows.push(dt.to_string());
+        }
+        Components::Boxed(rows)
+    }
+}
+
+impl Feed {
+    pub fn build(&self) -> Vec<Components> {
+        self.items.iter().map(|i| i.build()).collect()
     }
 }
 

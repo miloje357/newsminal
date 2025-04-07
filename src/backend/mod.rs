@@ -1,6 +1,7 @@
 mod n1;
 
-use crate::frontend::Components;
+use crate::{Feed, FeedItem, frontend::Components};
+use chrono::Utc;
 use n1::N1;
 use scraper::Html;
 use std::{error::Error, fmt::Display};
@@ -32,6 +33,7 @@ impl Display for ArticleError {
     }
 }
 
+// TODO: Add scraper: Box<dyn Scraper> to this function
 pub fn get_article(url: &str) -> Result<Vec<Components>, Box<dyn Error>> {
     let scrapers: Vec<Box<dyn Scraper>> = vec![Box::new(N1)];
 
@@ -44,7 +46,7 @@ pub fn get_article(url: &str) -> Result<Vec<Components>, Box<dyn Error>> {
     match html.error_for_status() {
         Ok(html) => {
             let html = Html::parse_document(&html.text()?);
-            Ok(scr.get_article(html)?)
+            Ok(scr.parse_article(html)?)
         }
         Err(err) => Err(Box::new(ArticleError::ServerError(err.to_string()))),
     }
@@ -52,7 +54,44 @@ pub fn get_article(url: &str) -> Result<Vec<Components>, Box<dyn Error>> {
 
 trait Scraper {
     fn get_domain(&self) -> &str;
-    fn get_article(&self, html: Html) -> Result<Vec<Components>, ArticleError>;
+    fn get_feed_url(&self, page: usize) -> String;
+    fn parse_article(&self, html: Html) -> Result<Vec<Components>, ArticleError>;
+    fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, ArticleError>;
+}
+
+impl Feed {
+    fn get_feed_site(url: &str, scr: Box<dyn Scraper>) -> Result<Vec<FeedItem>, Box<dyn Error>> {
+        let html = reqwest::blocking::get(url)?;
+        let html = html.error_for_status()?;
+        let html = Html::parse_document(&html.text()?);
+        Ok(scr.parse_feed(html)?)
+    }
+
+    pub fn new() -> Result<Self, Box<dyn Error>> {
+        let scrapers: Vec<Box<dyn Scraper>> = vec![Box::new(N1)];
+        let mut feed_items = Vec::new();
+        for scr in scrapers {
+            let url = scr.get_feed_url(0);
+            match Self::get_feed_site(&url, scr) {
+                Ok(new_feed_items) => {
+                    feed_items.extend(new_feed_items);
+                }
+                Err(err) => {
+                    let title = format!("Couldn't get articles from {}: {err}", url);
+                    feed_items.push(FeedItem {
+                        url: None,
+                        title,
+                        published: None,
+                    })
+                }
+            }
+        }
+
+        Ok(Feed {
+            time: Utc::now().naive_utc(),
+            items: feed_items,
+        })
+    }
 }
 
 // TODO: Add more scrapers
