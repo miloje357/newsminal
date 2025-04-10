@@ -15,11 +15,17 @@ use std::{
     time::Duration,
 };
 
+enum ScrollType {
+    UpByLine,
+    UpByFeedItem,
+    DownByLine,
+    DownByFeedItem,
+}
+
 enum Control {
     Quit,
     Resize(u16, u16),
-    ScrollUp,
-    ScrollDown,
+    Scroll(ScrollType),
 }
 
 struct FeedItem {
@@ -44,8 +50,8 @@ fn map_input(event: Event) -> Option<Control> {
                             return Some(Control::Quit);
                         }
                         match c {
-                            'k' => return Some(Control::ScrollDown),
-                            'j' => return Some(Control::ScrollUp),
+                            'k' => return Some(Control::Scroll(ScrollType::UpByFeedItem)),
+                            'j' => return Some(Control::Scroll(ScrollType::DownByFeedItem)),
                             'q' => return Some(Control::Quit),
                             _ => {}
                         }
@@ -116,12 +122,8 @@ fn run(feed: Vec<Components>) -> io::Result<()> {
         if poll(Duration::ZERO)? {
             match map_input(read()?) {
                 Some(Control::Quit) => quit = true,
-                Some(Control::ScrollUp) => {
-                    article.scroll_up(&mut stdout)?;
-                    stdout.flush()?;
-                }
-                Some(Control::ScrollDown) => {
-                    article.scroll_down(&mut stdout)?;
+                Some(Control::Scroll(st)) => {
+                    article.scroll_by(&mut stdout, st)?;
                     stdout.flush()?;
                 }
                 Some(Control::Resize(nw, nh)) => {

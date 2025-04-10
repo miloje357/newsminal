@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use crossterm::{QueueableCommand, cursor, style::Stylize, terminal};
 
-use crate::{Feed, FeedItem};
+use crate::{Feed, FeedItem, ScrollType};
 
 pub enum Components {
     Title(String),
@@ -32,6 +32,8 @@ pub struct TextPad {
     width: u16,
 }
 
+// TODO: Special TextPad for Feed (scroll by item)
+
 impl TextPad {
     pub fn new(content: Vec<String>, height: u16, width: u16) -> io::Result<Self> {
         Ok(Self {
@@ -53,25 +55,78 @@ impl TextPad {
         Ok(())
     }
 
-    pub fn scroll_down(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
-        if self.first <= 0 {
-            return Ok(());
+    fn scroll_by_lines(
+        &mut self,
+        mut qc: impl QueueableCommand + Write,
+        lines: i16,
+    ) -> io::Result<()> {
+        let mut draw_line = 0;
+        let is_up = lines < 0;
+        let mut lines = lines.abs() as u16;
+
+        if is_up {
+            if self.first < lines {
+                lines = self.first;
+            }
+            self.first -= lines;
+
+            qc.queue(terminal::ScrollDown(lines))?;
+        } else {
+            let last = self.first + self.height;
+            if (last + lines) as usize >= self.content.len() {
+                lines = self.content.len() as u16 - last;
+            }
+            self.first += lines;
+            draw_line = self.height - lines;
+
+            qc.queue(terminal::ScrollUp(lines))?;
         }
-        self.first -= 1;
-        qc.queue(terminal::ScrollDown(1))?
-            .queue(cursor::MoveTo(0, 0))?;
-        qc.write(self.content[self.first as usize].as_bytes())?;
+
+        qc.queue(cursor::MoveTo(0, draw_line))?;
+        for line in self
+            .content
+            .iter()
+            .skip((self.first + draw_line) as usize)
+            .take(lines as usize)
+        {
+            qc.write(line.as_bytes())?;
+            qc.queue(cursor::MoveDown(1))?
+                .queue(cursor::MoveToColumn(0))?;
+        }
         Ok(())
     }
 
-    pub fn scroll_up(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
-        if (self.first + self.height) as usize >= self.content.len() {
-            return Ok(());
-        }
-        self.first += 1;
-        qc.queue(terminal::ScrollUp(1))?
-            .queue(cursor::MoveTo(0, self.height))?;
-        qc.write(self.content[(self.first + self.height - 1) as usize].as_bytes())?;
+    pub fn scroll_by(
+        &mut self,
+        mut qc: impl QueueableCommand + Write,
+        con: ScrollType,
+    ) -> io::Result<()> {
+        match con {
+            ScrollType::UpByLine => self.scroll_by_lines(&mut qc, -1)?,
+            ScrollType::DownByLine => self.scroll_by_lines(&mut qc, 1)?,
+            ScrollType::UpByFeedItem => {
+                // TODO: Figure out what lines should be be
+                let lines = self
+                    .content
+                    .iter()
+                    .take(self.first as usize)
+                    .rev()
+                    .take_while(|line| !line.chars().all(|c| c.is_whitespace()))
+                    .count() as i16
+                    + 1;
+                self.scroll_by_lines(&mut qc, -lines)?;
+            }
+            ScrollType::DownByFeedItem => {
+                let lines = self
+                    .content
+                    .iter()
+                    .skip((self.first + self.height) as usize + 1)
+                    .take_while(|line| !line.chars().all(|c| c.is_whitespace()))
+                    .count() as i16
+                    + 1;
+                self.scroll_by_lines(&mut qc, lines)?;
+            }
+        };
         Ok(())
     }
 
@@ -104,6 +159,7 @@ pub trait Component {
     fn build(text: &str, width: usize) -> Vec<String>;
 }
 
+// BUG: Doesn't display utf-8 properly
 pub struct Paragraph;
 impl Component for Paragraph {
     fn build(text: &str, width: usize) -> Vec<String> {
