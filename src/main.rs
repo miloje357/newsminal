@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 mod backend;
 mod frontend;
 
@@ -8,38 +9,46 @@ use crossterm::{
     execute,
     terminal::{self, ClearType},
 };
-use frontend::{Components, TextPad};
+use frontend::TextPad;
 use std::{
     io::{self, Write, stdout},
     process, thread,
     time::Duration,
 };
 
-enum ScrollType {
+pub enum ScrollType {
     UpByLine,
     UpByFeedItem,
     DownByLine,
     DownByFeedItem,
 }
 
-enum Control {
+enum ArticleControls {
     Quit,
     Resize(u16, u16),
     Scroll(ScrollType),
+}
+
+enum FeedControls {
+    Quit,
+    Resize(u16, u16),
+    Select(ScrollType),
 }
 
 struct FeedItem {
     url: Option<String>,
     title: String,
     published: Option<NaiveDateTime>,
+    at: Option<usize>,
 }
 
 pub struct Feed {
     time: NaiveDateTime,
     items: Vec<FeedItem>,
+    selected: usize,
 }
 
-fn map_input(event: Event) -> Option<Control> {
+fn map_input(event: Event) -> Option<FeedControls> {
     match event {
         Event::Key(event) => {
             if event.kind == KeyEventKind::Press {
@@ -47,12 +56,12 @@ fn map_input(event: Event) -> Option<Control> {
                 match event.code {
                     KeyCode::Char(c) => {
                         if event.modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
-                            return Some(Control::Quit);
+                            return Some(FeedControls::Quit);
                         }
                         match c {
-                            'k' => return Some(Control::Scroll(ScrollType::UpByFeedItem)),
-                            'j' => return Some(Control::Scroll(ScrollType::DownByFeedItem)),
-                            'q' => return Some(Control::Quit),
+                            'k' => return Some(FeedControls::Select(ScrollType::UpByFeedItem)),
+                            'j' => return Some(FeedControls::Select(ScrollType::DownByFeedItem)),
+                            'q' => return Some(FeedControls::Quit),
                             _ => {}
                         }
                     }
@@ -61,7 +70,7 @@ fn map_input(event: Event) -> Option<Control> {
             }
         }
         // BUG: Doesn't work
-        Event::Resize(nw, nh) => return Some(Control::Resize(nw, nh)),
+        Event::Resize(nw, nh) => return Some(FeedControls::Resize(nw, nh)),
         // TODO: Add mouse scrolling
         Event::Mouse(event) => match event.kind {
             /*
@@ -91,7 +100,7 @@ impl ScreenState {
 
 impl Drop for ScreenState {
     fn drop(&mut self) {
-        let _ = execute!(
+        execute!(
             stdout(),
             event::DisableMouseCapture,
             terminal::LeaveAlternateScreen,
@@ -105,30 +114,32 @@ impl Drop for ScreenState {
     }
 }
 
-fn run(feed: Vec<Components>) -> io::Result<()> {
+fn run(mut feed: Feed) -> io::Result<()> {
     let _screen_state = ScreenState::enable()?;
     let mut stdout = stdout();
     let (w, h) = terminal::size()?;
 
     // TODO: Add article geometry configuration
-    let body = frontend::build_componenets(feed, (w / 2).into());
-    let mut article = TextPad::new(body, h, w)?;
+    let body = frontend::build_componenets(feed.build(), (w / 2).into());
+    feed.set_positions(&body);
+    let mut feed_textpad = TextPad::new(body, h, w)?;
 
-    article.draw(&mut stdout)?;
+    feed_textpad.draw(&mut stdout)?;
+    feed.redraw_selected(&mut stdout, &mut feed_textpad, true)?;
     stdout.flush()?;
 
     let mut quit = false;
     while !quit {
         if poll(Duration::ZERO)? {
             match map_input(read()?) {
-                Some(Control::Quit) => quit = true,
-                Some(Control::Scroll(st)) => {
-                    article.scroll_by(&mut stdout, st)?;
+                Some(FeedControls::Quit) => quit = true,
+                Some(FeedControls::Select(st)) => {
+                    feed.select(&mut stdout, &mut feed_textpad, st)?;
                     stdout.flush()?;
                 }
-                Some(Control::Resize(nw, nh)) => {
-                    article.resize(nw, nh)?;
-                    article.draw(&mut stdout)?;
+                Some(FeedControls::Resize(nw, nh)) => {
+                    feed_textpad.resize(nw, nh)?;
+                    feed_textpad.draw(&mut stdout)?;
                     stdout.flush()?;
                 }
                 None => {}
@@ -143,12 +154,10 @@ fn run(feed: Vec<Components>) -> io::Result<()> {
 // TODO: Add the feed
 // TODO: Add a help command
 fn main() {
-    let feed = Feed::new()
-        .unwrap_or_else(|err| {
-            eprintln!("Couldn't get feed: {err}");
-            process::exit(1);
-        })
-        .build();
+    let feed = Feed::new().unwrap_or_else(|err| {
+        eprintln!("Couldn't get feed: {err}");
+        process::exit(1);
+    });
 
     run(feed).unwrap_or_else(|err| {
         eprintln!("Display error: {err}");

@@ -1,6 +1,10 @@
 use std::io::{self, Write};
 
-use crossterm::{QueueableCommand, cursor, style::Stylize, terminal};
+use crossterm::{
+    QueueableCommand, cursor,
+    style::{self, Stylize},
+    terminal,
+};
 
 use crate::{Feed, FeedItem, ScrollType};
 
@@ -31,8 +35,6 @@ pub struct TextPad {
     height: u16,
     width: u16,
 }
-
-// TODO: Special TextPad for Feed (scroll by item)
 
 impl TextPad {
     pub fn new(content: Vec<String>, height: u16, width: u16) -> io::Result<Self> {
@@ -105,7 +107,6 @@ impl TextPad {
             ScrollType::UpByLine => self.scroll_by_lines(&mut qc, -1)?,
             ScrollType::DownByLine => self.scroll_by_lines(&mut qc, 1)?,
             ScrollType::UpByFeedItem => {
-                // TODO: Figure out what lines should be be
                 let lines = self
                     .content
                     .iter()
@@ -239,6 +240,85 @@ impl FeedItem {
 impl Feed {
     pub fn build(&self) -> Vec<Components> {
         self.items.iter().map(|i| i.build()).collect()
+    }
+
+    pub fn set_positions(&mut self, content: &[String]) {
+        let mut items = self.items.iter_mut();
+        for (i, line) in content.iter().enumerate() {
+            if line.chars().all(|c| c.is_whitespace()) {
+                if let Some(item) = items.next() {
+                    item.at = Some(i);
+                }
+            }
+        }
+    }
+
+    pub fn redraw_selected(
+        &self,
+        mut qc: impl QueueableCommand + Write,
+        textpad: &mut TextPad,
+        is_selected: bool,
+    ) -> io::Result<()> {
+        let first_row = self.items[self.selected].at.unwrap();
+        let last_row = {
+            if self.selected + 1 >= self.items.len() {
+                textpad.content.len()
+            } else {
+                self.items[self.selected + 1].at.unwrap()
+            }
+        };
+        let item_content = &textpad.content[first_row..last_row];
+        qc.queue(cursor::MoveTo(1, first_row as u16 - textpad.first))?;
+        for line in item_content {
+            if is_selected {
+                qc.queue(style::PrintStyledContent(line.clone().red()))?;
+            } else {
+                qc.queue(style::Print(line))?;
+            }
+            qc.queue(cursor::MoveDown(1))?
+                .queue(cursor::MoveToColumn(0))?;
+        }
+        Ok(())
+    }
+
+    pub fn select(
+        &mut self,
+        mut qc: impl QueueableCommand + Write,
+        textpad: &mut TextPad,
+        st: ScrollType,
+    ) -> io::Result<()> {
+        self.redraw_selected(&mut qc, textpad, false)?;
+        match st {
+            ScrollType::UpByFeedItem => {
+                if self.selected > 0 {
+                    self.selected -= 1;
+                    if self.selected > 0 {
+                        let next_row = self.items[self.selected - 1].at.unwrap() as u16;
+                        if next_row < textpad.first {
+                            textpad.scroll_by(&mut qc, st)?;
+                        }
+                    }
+                }
+            }
+            ScrollType::DownByFeedItem => {
+                if self.selected < self.items.len() - 1 {
+                    self.selected += 1;
+                    let next_row = if self.selected < self.items.len() - 2 {
+                        self.items[self.selected + 2].at.unwrap() as u16
+                    } else if self.selected < self.items.len() - 1 {
+                        self.items[self.selected + 1].at.unwrap() as u16
+                    } else {
+                        textpad.first
+                    };
+                    if next_row - textpad.first >= textpad.height {
+                        textpad.scroll_by(&mut qc, st)?;
+                    }
+                }
+            }
+            _ => {}
+        };
+        self.redraw_selected(&mut qc, textpad, true)?;
+        Ok(())
     }
 }
 

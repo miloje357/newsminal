@@ -82,6 +82,7 @@ impl Feed {
                         url: None,
                         title,
                         published: None,
+                        at: None,
                     })
                 }
             }
@@ -90,6 +91,7 @@ impl Feed {
         Ok(Feed {
             time: Utc::now().naive_utc(),
             items: feed_items,
+            selected: 0,
         })
     }
 }

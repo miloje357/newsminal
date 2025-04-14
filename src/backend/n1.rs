@@ -105,6 +105,7 @@ impl Scraper for N1 {
                     url: Some(url),
                     title,
                     published: Some(published),
+                    at: None,
                 })
             })
             .collect())
