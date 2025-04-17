@@ -67,6 +67,8 @@ impl Feed {
         Ok(scr.parse_feed(html)?)
     }
 
+    // TODO: Add scraping from multiple sources
+    // TODO: Add scraping from multiple pages of the same source
     pub fn new() -> Result<Self, Box<dyn Error>> {
         let scrapers: Vec<Box<dyn Scraper>> = vec![Box::new(N1)];
         let mut feed_items = Vec::new();
@@ -94,6 +96,12 @@ impl Feed {
             selected: 0,
         })
     }
+
+    pub fn get_selected_url(&self) -> &str {
+        self.items[self.selected].url.as_ref().unwrap()
+    }
+
+    // TODO: refresh()
 }
 
 // TODO: Add more scrapers

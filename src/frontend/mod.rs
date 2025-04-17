@@ -6,7 +6,7 @@ use crossterm::{
     terminal,
 };
 
-use crate::{Feed, FeedItem, ScrollType};
+use crate::{Direction, Feed, FeedItem, View};
 
 pub enum Components {
     Title(String),
@@ -49,7 +49,12 @@ impl TextPad {
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
         qc.queue(terminal::Clear(terminal::ClearType::All))?
             .queue(cursor::MoveTo(0, 0))?;
-        for line in self.content.iter().take(self.height as usize) {
+        for line in self
+            .content
+            .iter()
+            .skip(self.first as usize)
+            .take(self.height as usize)
+        {
             qc.write(line.as_bytes())?;
             qc.queue(cursor::MoveDown(1))?
                 .queue(cursor::MoveToColumn(0))?;
@@ -75,7 +80,9 @@ impl TextPad {
             qc.queue(terminal::ScrollDown(lines))?;
         } else {
             let last = self.first + self.height;
-            if (last + lines) as usize >= self.content.len() {
+            if (self.content.len() as u16) < self.height {
+                lines = 0
+            } else if (last + lines) as usize >= self.content.len() {
                 lines = self.content.len() as u16 - last;
             }
             self.first += lines;
@@ -101,12 +108,13 @@ impl TextPad {
     pub fn scroll_by(
         &mut self,
         mut qc: impl QueueableCommand + Write,
-        con: ScrollType,
+        dir: Direction,
+        view: View,
     ) -> io::Result<()> {
-        match con {
-            ScrollType::UpByLine => self.scroll_by_lines(&mut qc, -1)?,
-            ScrollType::DownByLine => self.scroll_by_lines(&mut qc, 1)?,
-            ScrollType::UpByFeedItem => {
+        match (dir, view) {
+            (Direction::Up, View::Article) => self.scroll_by_lines(&mut qc, -1)?,
+            (Direction::Down, View::Article) => self.scroll_by_lines(&mut qc, 1)?,
+            (Direction::Up, View::Feed) => {
                 let lines = self
                     .content
                     .iter()
@@ -117,7 +125,7 @@ impl TextPad {
                     + 1;
                 self.scroll_by_lines(&mut qc, -lines)?;
             }
-            ScrollType::DownByFeedItem => {
+            (Direction::Down, View::Feed) => {
                 let lines = self
                     .content
                     .iter()
@@ -285,22 +293,22 @@ impl Feed {
         &mut self,
         mut qc: impl QueueableCommand + Write,
         textpad: &mut TextPad,
-        st: ScrollType,
+        st: Direction,
     ) -> io::Result<()> {
         self.redraw_selected(&mut qc, textpad, false)?;
         match st {
-            ScrollType::UpByFeedItem => {
+            Direction::Up => {
                 if self.selected > 0 {
                     self.selected -= 1;
                     if self.selected > 0 {
                         let next_row = self.items[self.selected - 1].at.unwrap() as u16;
                         if next_row < textpad.first {
-                            textpad.scroll_by(&mut qc, st)?;
+                            textpad.scroll_by(&mut qc, st, View::Feed)?;
                         }
                     }
                 }
             }
-            ScrollType::DownByFeedItem => {
+            Direction::Down => {
                 if self.selected < self.items.len() - 1 {
                     self.selected += 1;
                     let next_row = if self.selected < self.items.len() - 2 {
@@ -311,11 +319,10 @@ impl Feed {
                         textpad.first
                     };
                     if next_row - textpad.first >= textpad.height {
-                        textpad.scroll_by(&mut qc, st)?;
+                        textpad.scroll_by(&mut qc, st, View::Feed)?;
                     }
                 }
             }
-            _ => {}
         };
         self.redraw_selected(&mut qc, textpad, true)?;
         Ok(())

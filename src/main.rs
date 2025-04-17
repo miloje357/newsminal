@@ -1,7 +1,7 @@
-#[allow(dead_code)]
 mod backend;
 mod frontend;
 
+use backend::get_article;
 use chrono::NaiveDateTime;
 use crossterm::{
     QueueableCommand, cursor,
@@ -9,30 +9,29 @@ use crossterm::{
     execute,
     terminal::{self, ClearType},
 };
-use frontend::TextPad;
+use frontend::{Components, TextPad};
 use std::{
     io::{self, Write, stdout},
     process, thread,
     time::Duration,
 };
 
-pub enum ScrollType {
-    UpByLine,
-    UpByFeedItem,
-    DownByLine,
-    DownByFeedItem,
+pub enum Direction {
+    Up,
+    Down,
 }
 
-enum ArticleControls {
+enum Controls {
     Quit,
     Resize(u16, u16),
-    Scroll(ScrollType),
+    MoveSelect(Direction),
+    Scroll(Direction),
+    Select,
 }
 
-enum FeedControls {
-    Quit,
-    Resize(u16, u16),
-    Select(ScrollType),
+pub enum View {
+    Feed,
+    Article,
 }
 
 struct FeedItem {
@@ -48,29 +47,35 @@ pub struct Feed {
     selected: usize,
 }
 
-fn map_input(event: Event) -> Option<FeedControls> {
+// TODO: Deal with Feed/Article input
+fn map_input(event: Event, view: View) -> Option<Controls> {
     match event {
         Event::Key(event) => {
             if event.kind == KeyEventKind::Press {
                 // TODO: Add arrows for control
-                match event.code {
-                    KeyCode::Char(c) => {
+                match (event.code, view) {
+                    (KeyCode::Char(c), view) => {
                         if event.modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
-                            return Some(FeedControls::Quit);
+                            return Some(Controls::Quit);
                         }
-                        match c {
-                            'k' => return Some(FeedControls::Select(ScrollType::UpByFeedItem)),
-                            'j' => return Some(FeedControls::Select(ScrollType::DownByFeedItem)),
-                            'q' => return Some(FeedControls::Quit),
-                            _ => {}
+                        match (c, view) {
+                            ('k', View::Feed) => return Some(Controls::MoveSelect(Direction::Up)),
+                            ('k', View::Article) => return Some(Controls::Scroll(Direction::Up)),
+                            ('j', View::Feed) => {
+                                return Some(Controls::MoveSelect(Direction::Down));
+                            }
+                            ('j', View::Article) => return Some(Controls::Scroll(Direction::Down)),
+                            ('q', _) => return Some(Controls::Quit),
+                            _ => return None,
                         }
                     }
+                    (KeyCode::Enter, View::Feed) => return Some(Controls::Select),
+                    (KeyCode::Backspace, _) => return Some(Controls::Quit),
                     _ => {}
                 }
             }
         }
-        // BUG: Doesn't work
-        Event::Resize(nw, nh) => return Some(FeedControls::Resize(nw, nh)),
+        Event::Resize(nw, nh) => return Some(Controls::Resize(nw, nh)),
         // TODO: Add mouse scrolling
         Event::Mouse(event) => match event.kind {
             /*
@@ -114,7 +119,44 @@ impl Drop for ScreenState {
     }
 }
 
-fn run(mut feed: Feed) -> io::Result<()> {
+fn run_article(article: Vec<Components>) -> io::Result<()> {
+    let mut stdout = stdout();
+    let (w, h) = terminal::size()?;
+
+    // TODO: Add article geometry configuration
+    let body = frontend::build_componenets(article, (w / 2).into());
+    let mut article_textpad = TextPad::new(body, h, w)?;
+
+    article_textpad.draw(&mut stdout)?;
+    stdout.flush()?;
+
+    let mut to_feed = false;
+    while !to_feed {
+        if poll(Duration::ZERO)? {
+            match map_input(read()?, View::Article) {
+                Some(Controls::Quit) => to_feed = true,
+                Some(Controls::Resize(nw, nh)) => {
+                    article_textpad.resize(nw, nh)?;
+                    article_textpad.draw(&mut stdout)?;
+                    stdout.flush()?;
+                }
+                Some(Controls::Scroll(dir)) => {
+                    article_textpad.scroll_by(&mut stdout, dir, View::Article)?;
+                    stdout.flush()?;
+                }
+                Some(Controls::Select) => {}
+                Some(Controls::MoveSelect(_)) => {}
+                None => {}
+            }
+        }
+        thread::sleep(Duration::from_millis(16));
+    }
+
+    Ok(())
+}
+
+// TODO: Run build_components() each resize
+fn run_feed(mut feed: Feed) -> io::Result<()> {
     let _screen_state = ScreenState::enable()?;
     let mut stdout = stdout();
     let (w, h) = terminal::size()?;
@@ -131,17 +173,28 @@ fn run(mut feed: Feed) -> io::Result<()> {
     let mut quit = false;
     while !quit {
         if poll(Duration::ZERO)? {
-            match map_input(read()?) {
-                Some(FeedControls::Quit) => quit = true,
-                Some(FeedControls::Select(st)) => {
-                    feed.select(&mut stdout, &mut feed_textpad, st)?;
+            match map_input(read()?, View::Feed) {
+                Some(Controls::Quit) => quit = true,
+                Some(Controls::MoveSelect(dir)) => {
+                    feed.select(&mut stdout, &mut feed_textpad, dir)?;
                     stdout.flush()?;
                 }
-                Some(FeedControls::Resize(nw, nh)) => {
+                Some(Controls::Resize(nw, nh)) => {
                     feed_textpad.resize(nw, nh)?;
                     feed_textpad.draw(&mut stdout)?;
                     stdout.flush()?;
                 }
+                Some(Controls::Select) => {
+                    let url = feed.get_selected_url();
+                    // TODO: Figure out how to display errors
+                    let article = get_article(url).unwrap();
+                    run_article(article)?;
+
+                    feed_textpad.draw(&mut stdout)?;
+                    feed.redraw_selected(&mut stdout, &mut feed_textpad, true)?;
+                    stdout.flush()?;
+                }
+                Some(Controls::Scroll(_)) => {}
                 None => {}
             }
         }
@@ -151,7 +204,6 @@ fn run(mut feed: Feed) -> io::Result<()> {
     Ok(())
 }
 
-// TODO: Add the feed
 // TODO: Add a help command
 fn main() {
     let feed = Feed::new().unwrap_or_else(|err| {
@@ -159,7 +211,7 @@ fn main() {
         process::exit(1);
     });
 
-    run(feed).unwrap_or_else(|err| {
+    run_feed(feed).unwrap_or_else(|err| {
         eprintln!("Display error: {err}");
         process::exit(1);
     });
