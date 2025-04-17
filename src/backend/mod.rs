@@ -67,7 +67,6 @@ impl Feed {
         Ok(scr.parse_feed(html)?)
     }
 
-    // TODO: Add scraping from multiple sources
     // TODO: Add scraping from multiple pages of the same source
     pub fn new() -> Result<Self, Box<dyn Error>> {
         let scrapers: Vec<Box<dyn Scraper>> = vec![Box::new(N1)];

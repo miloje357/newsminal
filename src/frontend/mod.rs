@@ -16,7 +16,7 @@ pub enum Components {
     Boxed(Vec<String>),
 }
 
-pub fn build_componenets(components: Vec<Components>, width: usize) -> Vec<String> {
+pub fn build_componenets(components: &[Components], width: usize) -> Vec<String> {
     components
         .iter()
         .flat_map(|comp| match comp {

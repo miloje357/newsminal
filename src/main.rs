@@ -23,7 +23,7 @@ pub enum Direction {
 
 enum Controls {
     Quit,
-    Resize(u16, u16),
+    Resize,
     MoveSelect(Direction),
     Scroll(Direction),
     Select,
@@ -75,7 +75,7 @@ fn map_input(event: Event, view: View) -> Option<Controls> {
                 }
             }
         }
-        Event::Resize(nw, nh) => return Some(Controls::Resize(nw, nh)),
+        Event::Resize(_, _) => return Some(Controls::Resize),
         // TODO: Add mouse scrolling
         Event::Mouse(event) => match event.kind {
             /*
@@ -124,7 +124,7 @@ fn run_article(article: Vec<Components>) -> io::Result<()> {
     let (w, h) = terminal::size()?;
 
     // TODO: Add article geometry configuration
-    let body = frontend::build_componenets(article, (w / 2).into());
+    let body = frontend::build_componenets(&article, (w / 2).into());
     let mut article_textpad = TextPad::new(body, h, w)?;
 
     article_textpad.draw(&mut stdout)?;
@@ -135,10 +135,8 @@ fn run_article(article: Vec<Components>) -> io::Result<()> {
         if poll(Duration::ZERO)? {
             match map_input(read()?, View::Article) {
                 Some(Controls::Quit) => to_feed = true,
-                Some(Controls::Resize(nw, nh)) => {
-                    article_textpad.resize(nw, nh)?;
-                    article_textpad.draw(&mut stdout)?;
-                    stdout.flush()?;
+                Some(Controls::Resize) => {
+                    return run_article(article);
                 }
                 Some(Controls::Scroll(dir)) => {
                     article_textpad.scroll_by(&mut stdout, dir, View::Article)?;
@@ -155,14 +153,17 @@ fn run_article(article: Vec<Components>) -> io::Result<()> {
     Ok(())
 }
 
-// TODO: Run build_components() each resize
+// BUG: 1. Open any news article
+//      2. Resize
+//      3. Go Back
+//      No resize in the Feed View
 fn run_feed(mut feed: Feed) -> io::Result<()> {
     let _screen_state = ScreenState::enable()?;
     let mut stdout = stdout();
     let (w, h) = terminal::size()?;
 
     // TODO: Add article geometry configuration
-    let body = frontend::build_componenets(feed.build(), (w / 2).into());
+    let body = frontend::build_componenets(&feed.build(), (w / 2).into());
     feed.set_positions(&body);
     let mut feed_textpad = TextPad::new(body, h, w)?;
 
@@ -179,10 +180,8 @@ fn run_feed(mut feed: Feed) -> io::Result<()> {
                     feed.select(&mut stdout, &mut feed_textpad, dir)?;
                     stdout.flush()?;
                 }
-                Some(Controls::Resize(nw, nh)) => {
-                    feed_textpad.resize(nw, nh)?;
-                    feed_textpad.draw(&mut stdout)?;
-                    stdout.flush()?;
+                Some(Controls::Resize) => {
+                    return run_feed(feed);
                 }
                 Some(Controls::Select) => {
                     let url = feed.get_selected_url();
