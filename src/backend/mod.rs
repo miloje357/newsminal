@@ -77,6 +77,7 @@ impl Feed {
                 Ok(new_feed_items) => {
                     feed_items.extend(new_feed_items);
                 }
+                // TODO: Handle errors better
                 Err(err) => {
                     let title = format!("Couldn't get articles from {}: {err}", url);
                     feed_items.push(FeedItem {

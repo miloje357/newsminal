@@ -9,10 +9,13 @@ use crossterm::{
     execute,
     terminal::{self, ClearType},
 };
-use frontend::{Components, TextPad};
+use frontend::{Components, Geometry, TextPad};
 use std::{
+    cell::RefCell,
     io::{self, Write, stdout},
-    process, thread,
+    process,
+    rc::Rc,
+    thread,
     time::Duration,
 };
 
@@ -23,7 +26,7 @@ pub enum Direction {
 
 enum Controls {
     Quit,
-    Resize,
+    Resize((u16, u16)),
     MoveSelect(Direction),
     Scroll(Direction),
     Select,
@@ -75,7 +78,7 @@ fn map_input(event: Event, view: View) -> Option<Controls> {
                 }
             }
         }
-        Event::Resize(_, _) => return Some(Controls::Resize),
+        Event::Resize(w, h) => return Some(Controls::Resize((w, h))),
         // TODO: Add mouse scrolling
         Event::Mouse(event) => match event.kind {
             /*
@@ -119,13 +122,12 @@ impl Drop for ScreenState {
     }
 }
 
-fn run_article(article: Vec<Components>) -> io::Result<()> {
+fn run_article(article: Vec<Components>, geo: &Rc<RefCell<Geometry>>) -> io::Result<()> {
     let mut stdout = stdout();
-    let (w, h) = terminal::size()?;
 
-    // TODO: Add article geometry configuration
-    let body = frontend::build_componenets(&article, (w / 2).into());
-    let mut article_textpad = TextPad::new(body, h, w)?;
+    geo.borrow_mut().change_view(View::Article);
+    let body = frontend::build_componenets(&article, geo.borrow().width as usize);
+    let mut article_textpad = TextPad::new(body, geo)?;
 
     article_textpad.draw(&mut stdout)?;
     stdout.flush()?;
@@ -135,8 +137,9 @@ fn run_article(article: Vec<Components>) -> io::Result<()> {
         if poll(Duration::ZERO)? {
             match map_input(read()?, View::Article) {
                 Some(Controls::Quit) => to_feed = true,
-                Some(Controls::Resize) => {
-                    return run_article(article);
+                Some(Controls::Resize(new_dimens)) => {
+                    geo.borrow_mut().resize(new_dimens);
+                    return run_article(article, geo);
                 }
                 Some(Controls::Scroll(dir)) => {
                     article_textpad.scroll_by(&mut stdout, dir, View::Article)?;
@@ -153,19 +156,12 @@ fn run_article(article: Vec<Components>) -> io::Result<()> {
     Ok(())
 }
 
-// BUG: 1. Open any news article
-//      2. Resize
-//      3. Go Back
-//      No resize in the Feed View
-fn run_feed(mut feed: Feed) -> io::Result<()> {
-    let _screen_state = ScreenState::enable()?;
+fn run_feed(mut feed: Feed, geo: &Rc<RefCell<Geometry>>) -> io::Result<()> {
     let mut stdout = stdout();
-    let (w, h) = terminal::size()?;
 
-    // TODO: Add article geometry configuration
-    let body = frontend::build_componenets(&feed.build(), (w / 2).into());
+    let body = frontend::build_componenets(&feed.build(), geo.borrow().width as usize);
     feed.set_positions(&body);
-    let mut feed_textpad = TextPad::new(body, h, w)?;
+    let mut feed_textpad = TextPad::new(body, geo)?;
 
     feed_textpad.draw(&mut stdout)?;
     feed.redraw_selected(&mut stdout, &mut feed_textpad, true)?;
@@ -180,18 +176,19 @@ fn run_feed(mut feed: Feed) -> io::Result<()> {
                     feed.select(&mut stdout, &mut feed_textpad, dir)?;
                     stdout.flush()?;
                 }
-                Some(Controls::Resize) => {
-                    return run_feed(feed);
+                Some(Controls::Resize(new_dimens)) => {
+                    geo.borrow_mut().resize(new_dimens);
+                    // TODO: Figure out a better way to have selected always displayed
+                    feed.selected = 0;
+                    return run_feed(feed, geo);
                 }
                 Some(Controls::Select) => {
                     let url = feed.get_selected_url();
                     // TODO: Figure out how to display errors
                     let article = get_article(url).unwrap();
-                    run_article(article)?;
-
-                    feed_textpad.draw(&mut stdout)?;
-                    feed.redraw_selected(&mut stdout, &mut feed_textpad, true)?;
-                    stdout.flush()?;
+                    run_article(article, geo)?;
+                    geo.borrow_mut().change_view(View::Feed);
+                    return run_feed(feed, geo);
                 }
                 Some(Controls::Scroll(_)) => {}
                 None => {}
@@ -210,7 +207,17 @@ fn main() {
         process::exit(1);
     });
 
-    run_feed(feed).unwrap_or_else(|err| {
+    let _screen_state = ScreenState::enable().unwrap_or_else(|err| {
+        eprintln!("Couldn't setup screen state: {err}");
+        process::exit(1);
+    });
+    let dimens = terminal::size().unwrap_or_else(|err| {
+        eprintln!("Couldn't get terminal dimentions: {err}");
+        process::exit(1);
+    });
+    let geo = Geometry::new(dimens);
+    let geo = Rc::new(RefCell::new(geo));
+    run_feed(feed, &geo).unwrap_or_else(|err| {
         eprintln!("Display error: {err}");
         process::exit(1);
     });
