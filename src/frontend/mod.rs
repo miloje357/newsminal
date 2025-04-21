@@ -70,6 +70,7 @@ impl Geometry {
         let (term_width, term_height) = term_dimens;
         self.term_width = term_width;
         self.term_height = term_height;
+        self.width = self.width.min(self.term_width);
         self.startx = (self.term_width - self.width) / 2;
     }
 }
@@ -150,7 +151,7 @@ impl<'a> TextPad<'a> {
         Ok(())
     }
 
-    pub fn scroll_by(
+    pub fn scroll(
         &mut self,
         mut qc: impl QueueableCommand + Write,
         dir: Direction,
@@ -160,6 +161,8 @@ impl<'a> TextPad<'a> {
         match (dir, view) {
             (Direction::Up, View::Article) => self.scroll_by_lines(&mut qc, -1)?,
             (Direction::Down, View::Article) => self.scroll_by_lines(&mut qc, 1)?,
+            (Direction::ThreeUp, _) => self.scroll_by_lines(&mut qc, -3)?,
+            (Direction::ThreeDown, _) => self.scroll_by_lines(&mut qc, 3)?,
             (Direction::Up, View::Feed) => {
                 let lines = self
                     .content
@@ -334,18 +337,18 @@ impl Feed {
         &mut self,
         mut qc: impl QueueableCommand + Write,
         textpad: &mut TextPad,
-        st: Direction,
+        dir: Direction,
     ) -> io::Result<()> {
         let term_height = textpad.geo.borrow().term_height;
         self.redraw_selected(&mut qc, textpad, false)?;
-        match st {
+        match dir {
             Direction::Up => {
                 if self.selected > 0 {
                     self.selected -= 1;
                     if self.selected > 0 {
                         let next_row = self.items[self.selected - 1].at.unwrap() as u16;
                         if next_row < textpad.first {
-                            textpad.scroll_by(&mut qc, st, View::Feed)?;
+                            textpad.scroll(&mut qc, dir, View::Feed)?;
                         }
                     }
                 }
@@ -361,10 +364,11 @@ impl Feed {
                         textpad.first
                     };
                     if next_row - textpad.first >= term_height {
-                        textpad.scroll_by(&mut qc, st, View::Feed)?;
+                        textpad.scroll(&mut qc, dir, View::Feed)?;
                     }
                 }
             }
+            _ => {}
         };
         self.redraw_selected(&mut qc, textpad, true)?;
         Ok(())

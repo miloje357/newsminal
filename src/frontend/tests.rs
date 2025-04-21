@@ -193,11 +193,10 @@ mod textpad {
     fn scroll_by_paragraph() {
         let mut tp = setup_textpad();
         dbg!(&tp.content);
-        tp.scroll_by(vec![], crate::ScrollType::DownByFeedItem)
+        tp.scroll(vec![], crate::ScrollType::DownByFeedItem)
             .unwrap();
         assert_eq!(tp.first, 8);
-        tp.scroll_by(vec![], crate::ScrollType::UpByFeedItem)
-            .unwrap();
+        tp.scroll(vec![], crate::ScrollType::UpByFeedItem).unwrap();
         assert_eq!(tp.first, 0);
     }
 }

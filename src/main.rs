@@ -1,15 +1,15 @@
 mod backend;
 mod frontend;
+mod input;
 
 use backend::get_article;
 use chrono::NaiveDateTime;
 use crossterm::{
-    QueueableCommand, cursor,
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, poll, read},
-    execute,
+    QueueableCommand, cursor, event, execute,
     terminal::{self, ClearType},
 };
 use frontend::{Components, Geometry, TextPad};
+use input::*;
 use std::{
     cell::RefCell,
     io::{self, Write, stdout},
@@ -18,24 +18,6 @@ use std::{
     thread,
     time::Duration,
 };
-
-pub enum Direction {
-    Up,
-    Down,
-}
-
-enum Controls {
-    Quit,
-    Resize((u16, u16)),
-    MoveSelect(Direction),
-    Scroll(Direction),
-    Select,
-}
-
-pub enum View {
-    Feed,
-    Article,
-}
 
 struct FeedItem {
     url: Option<String>,
@@ -48,48 +30,6 @@ pub struct Feed {
     time: NaiveDateTime,
     items: Vec<FeedItem>,
     selected: usize,
-}
-
-// TODO: Deal with Feed/Article input
-fn map_input(event: Event, view: View) -> Option<Controls> {
-    match event {
-        Event::Key(event) => {
-            if event.kind == KeyEventKind::Press {
-                // TODO: Add arrows for control
-                match (event.code, view) {
-                    (KeyCode::Char(c), view) => {
-                        if event.modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
-                            return Some(Controls::Quit);
-                        }
-                        match (c, view) {
-                            ('k', View::Feed) => return Some(Controls::MoveSelect(Direction::Up)),
-                            ('k', View::Article) => return Some(Controls::Scroll(Direction::Up)),
-                            ('j', View::Feed) => {
-                                return Some(Controls::MoveSelect(Direction::Down));
-                            }
-                            ('j', View::Article) => return Some(Controls::Scroll(Direction::Down)),
-                            ('q', _) => return Some(Controls::Quit),
-                            _ => return None,
-                        }
-                    }
-                    (KeyCode::Enter, View::Feed) => return Some(Controls::Select),
-                    (KeyCode::Backspace, _) => return Some(Controls::Quit),
-                    _ => {}
-                }
-            }
-        }
-        Event::Resize(w, h) => return Some(Controls::Resize((w, h))),
-        // TODO: Add mouse scrolling
-        Event::Mouse(event) => match event.kind {
-            /*
-            MouseEventKind::ScrollUp => return Some(Control::ScrollDown),
-            MouseEventKind::ScrollDown => return Some(Control::ScrollUp),
-            */
-            _ => {}
-        },
-        _ => {}
-    }
-    None
 }
 
 struct ScreenState;
@@ -133,17 +73,21 @@ fn run_article(article: Vec<Components>, geo: &Rc<RefCell<Geometry>>) -> io::Res
     stdout.flush()?;
 
     let mut to_feed = false;
+    let mut input = InputBuffer::new();
     while !to_feed {
-        if poll(Duration::ZERO)? {
-            match map_input(read()?, View::Article) {
+        if event::poll(Duration::ZERO)? {
+            match input.map(event::read()?, View::Article) {
                 Some(Controls::Quit) => to_feed = true,
                 Some(Controls::Resize(new_dimens)) => {
                     geo.borrow_mut().resize(new_dimens);
                     return run_article(article, geo);
                 }
                 Some(Controls::Scroll(dir)) => {
-                    article_textpad.scroll_by(&mut stdout, dir, View::Article)?;
+                    article_textpad.scroll(&mut stdout, dir, View::Article)?;
                     stdout.flush()?;
+                }
+                Some(Controls::GotoTop) => {
+                    return run_article(article, geo);
                 }
                 Some(Controls::Select) => {}
                 Some(Controls::MoveSelect(_)) => {}
@@ -168,9 +112,10 @@ fn run_feed(mut feed: Feed, geo: &Rc<RefCell<Geometry>>) -> io::Result<()> {
     stdout.flush()?;
 
     let mut quit = false;
+    let mut input = InputBuffer::new();
     while !quit {
-        if poll(Duration::ZERO)? {
-            match map_input(read()?, View::Feed) {
+        if event::poll(Duration::ZERO)? {
+            match input.map(event::read()?, View::Feed) {
                 Some(Controls::Quit) => quit = true,
                 Some(Controls::MoveSelect(dir)) => {
                     feed.select(&mut stdout, &mut feed_textpad, dir)?;
@@ -188,7 +133,14 @@ fn run_feed(mut feed: Feed, geo: &Rc<RefCell<Geometry>>) -> io::Result<()> {
                     let article = get_article(url).unwrap();
                     run_article(article, geo)?;
                     geo.borrow_mut().change_view(View::Feed);
+                    feed.selected = 0;
                     return run_feed(feed, geo);
+                }
+                Some(Controls::GotoTop) => {
+                    if feed.selected != 0 {
+                        feed.selected = 0;
+                        return run_feed(feed, geo);
+                    }
                 }
                 Some(Controls::Scroll(_)) => {}
                 None => {}
