@@ -1,16 +1,12 @@
+mod controllers;
+
+use crate::{FeedItem, View};
+use crossterm::{QueueableCommand, cursor, style::Stylize, terminal};
 use std::{
     cell::RefCell,
     io::{self, Write},
     rc::Rc,
 };
-
-use crossterm::{
-    QueueableCommand, cursor,
-    style::{self, Stylize},
-    terminal,
-};
-
-use crate::{Direction, Feed, FeedItem, View};
 
 pub enum Components {
     Title(String),
@@ -34,10 +30,11 @@ pub fn build_componenets(components: &[Components], width: usize) -> Vec<String>
 }
 
 pub struct Geometry {
-    pub term_height: u16,
-    pub term_width: u16,
-    pub startx: u16,
-    pub width: u16,
+    term_height: u16,
+    term_width: u16,
+    startx: u16,
+    width: u16,
+    max_width: u16,
 }
 
 // TODO: Implement configuration
@@ -54,15 +51,16 @@ impl Geometry {
             term_width,
             startx,
             width,
+            max_width: Self::FEED_WIDTH,
         }
     }
 
     pub fn change_view(&mut self, view: View) {
-        let new_width = match view {
+        self.max_width = match view {
             View::Feed => Self::FEED_WIDTH,
             View::Article => Self::ARTICLE_WIDTH,
         };
-        self.width = new_width.min(self.term_width);
+        self.width = self.max_width.min(self.term_width);
         self.startx = (self.term_width - self.width) / 2;
     }
 
@@ -70,24 +68,31 @@ impl Geometry {
         let (term_width, term_height) = term_dimens;
         self.term_width = term_width;
         self.term_height = term_height;
-        self.width = self.width.min(self.term_width);
+        self.width = (self.width.max(self.max_width)).min(self.term_width);
         self.startx = (self.term_width - self.width) / 2;
     }
 }
 
 pub struct TextPad<'a> {
+    components: Vec<Components>,
     content: Vec<String>,
     first: u16,
-    geo: &'a Rc<RefCell<Geometry>>,
+    pub geo: &'a Rc<RefCell<Geometry>>,
 }
 
 impl<'a> TextPad<'a> {
-    pub fn new(content: Vec<String>, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
+    pub fn new(components: Vec<Components>, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
         Ok(Self {
-            content,
+            content: build_componenets(&components, geo.borrow().width as usize),
+            components,
             first: 0,
             geo,
         })
+    }
+
+    pub fn resize(&mut self, term_dimens: (u16, u16)) {
+        self.geo.borrow_mut().resize(term_dimens);
+        self.content = build_componenets(&self.components, self.geo.borrow().width as usize);
     }
 
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
@@ -148,43 +153,6 @@ impl<'a> TextPad<'a> {
             qc.queue(cursor::MoveDown(1))?
                 .queue(cursor::MoveToColumn(geo.startx))?;
         }
-        Ok(())
-    }
-
-    pub fn scroll(
-        &mut self,
-        mut qc: impl QueueableCommand + Write,
-        dir: Direction,
-        view: View,
-    ) -> io::Result<()> {
-        let term_height = self.geo.borrow().term_height;
-        match (dir, view) {
-            (Direction::Up, View::Article) => self.scroll_by_lines(&mut qc, -1)?,
-            (Direction::Down, View::Article) => self.scroll_by_lines(&mut qc, 1)?,
-            (Direction::ThreeUp, _) => self.scroll_by_lines(&mut qc, -3)?,
-            (Direction::ThreeDown, _) => self.scroll_by_lines(&mut qc, 3)?,
-            (Direction::Up, View::Feed) => {
-                let lines = self
-                    .content
-                    .iter()
-                    .take(self.first as usize)
-                    .rev()
-                    .take_while(|line| !line.chars().all(|c| c.is_whitespace()))
-                    .count() as i16
-                    + 1;
-                self.scroll_by_lines(&mut qc, -lines)?;
-            }
-            (Direction::Down, View::Feed) => {
-                let lines = self
-                    .content
-                    .iter()
-                    .skip((self.first + term_height) as usize + 1)
-                    .take_while(|line| !line.chars().all(|c| c.is_whitespace()))
-                    .count() as i16
-                    + 1;
-                self.scroll_by_lines(&mut qc, lines)?;
-            }
-        };
         Ok(())
     }
 }
@@ -285,93 +253,6 @@ impl FeedItem {
             rows.push(dt.to_string());
         }
         Components::Boxed(rows)
-    }
-}
-
-impl Feed {
-    pub fn build(&self) -> Vec<Components> {
-        self.items.iter().map(|i| i.build()).collect()
-    }
-
-    pub fn set_positions(&mut self, content: &[String]) {
-        let mut items = self.items.iter_mut();
-        for (i, line) in content.iter().enumerate() {
-            if line.chars().all(|c| c.is_whitespace()) {
-                if let Some(item) = items.next() {
-                    item.at = Some(i);
-                }
-            }
-        }
-    }
-
-    pub fn redraw_selected(
-        &self,
-        mut qc: impl QueueableCommand + Write,
-        textpad: &mut TextPad,
-        is_selected: bool,
-    ) -> io::Result<()> {
-        let startx = textpad.geo.borrow().startx;
-        let first_row = self.items[self.selected].at.unwrap();
-        let last_row = {
-            if self.selected + 1 >= self.items.len() {
-                textpad.content.len()
-            } else {
-                self.items[self.selected + 1].at.unwrap()
-            }
-        };
-        let item_content = &textpad.content[first_row..last_row];
-        qc.queue(cursor::MoveTo(startx, first_row as u16 - textpad.first))?;
-        for line in item_content {
-            if is_selected {
-                qc.queue(style::PrintStyledContent(line.clone().red()))?;
-            } else {
-                qc.queue(style::Print(line))?;
-            }
-            qc.queue(cursor::MoveDown(1))?
-                .queue(cursor::MoveToColumn(startx))?;
-        }
-        Ok(())
-    }
-
-    pub fn select(
-        &mut self,
-        mut qc: impl QueueableCommand + Write,
-        textpad: &mut TextPad,
-        dir: Direction,
-    ) -> io::Result<()> {
-        let term_height = textpad.geo.borrow().term_height;
-        self.redraw_selected(&mut qc, textpad, false)?;
-        match dir {
-            Direction::Up => {
-                if self.selected > 0 {
-                    self.selected -= 1;
-                    if self.selected > 0 {
-                        let next_row = self.items[self.selected - 1].at.unwrap() as u16;
-                        if next_row < textpad.first {
-                            textpad.scroll(&mut qc, dir, View::Feed)?;
-                        }
-                    }
-                }
-            }
-            Direction::Down => {
-                if self.selected < self.items.len() - 1 {
-                    self.selected += 1;
-                    let next_row = if self.selected < self.items.len() - 2 {
-                        self.items[self.selected + 2].at.unwrap() as u16
-                    } else if self.selected < self.items.len() - 1 {
-                        self.items[self.selected + 1].at.unwrap() as u16
-                    } else {
-                        textpad.first
-                    };
-                    if next_row - textpad.first >= term_height {
-                        textpad.scroll(&mut qc, dir, View::Feed)?;
-                    }
-                }
-            }
-            _ => {}
-        };
-        self.redraw_selected(&mut qc, textpad, true)?;
-        Ok(())
     }
 }
 

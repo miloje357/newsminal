@@ -3,15 +3,13 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKin
 pub enum Direction {
     Up,
     Down,
-    ThreeUp,
-    ThreeDown,
 }
 
 pub enum Controls {
     Quit,
     Resize((u16, u16)),
     MoveSelect(Direction),
-    Scroll(Direction),
+    Scroll(Direction, u16),
     Select,
     GotoTop,
 }
@@ -36,9 +34,9 @@ impl InputBuffer {
         self.char_buffer.push(c);
         let control = match (self.char_buffer.as_slice(), view) {
             (['k'], View::Feed) => Some(Controls::MoveSelect(Direction::Up)),
-            (['k'], View::Article) => Some(Controls::Scroll(Direction::Up)),
+            (['k'], View::Article) => Some(Controls::Scroll(Direction::Up, 1)),
             (['j'], View::Feed) => Some(Controls::MoveSelect(Direction::Down)),
-            (['j'], View::Article) => Some(Controls::Scroll(Direction::Down)),
+            (['j'], View::Article) => Some(Controls::Scroll(Direction::Down, 1)),
             (['q'], _) => Some(Controls::Quit),
             (['g', 'g'], _) => Some(Controls::GotoTop),
             // TODO: Consider adding Controls::GotoBottom
@@ -65,9 +63,11 @@ impl InputBuffer {
                         (KeyCode::Enter, View::Feed) => Some(Controls::Select),
                         (KeyCode::Backspace, _) => Some(Controls::Quit),
                         (KeyCode::Up, View::Feed) => Some(Controls::MoveSelect(Direction::Up)),
-                        (KeyCode::Up, View::Article) => Some(Controls::Scroll(Direction::Up)),
+                        (KeyCode::Up, View::Article) => Some(Controls::Scroll(Direction::Up, 1)),
                         (KeyCode::Down, View::Feed) => Some(Controls::MoveSelect(Direction::Down)),
-                        (KeyCode::Down, View::Article) => Some(Controls::Scroll(Direction::Down)),
+                        (KeyCode::Down, View::Article) => {
+                            Some(Controls::Scroll(Direction::Down, 1))
+                        }
                         _ => None,
                     }
                 } else {
@@ -77,10 +77,10 @@ impl InputBuffer {
             Event::Resize(w, h) => Some(Controls::Resize((w, h))),
             Event::Mouse(event) => match (event.kind, view) {
                 (MouseEventKind::ScrollUp, View::Article) => {
-                    Some(Controls::Scroll(Direction::ThreeUp))
+                    Some(Controls::Scroll(Direction::Up, 3))
                 }
                 (MouseEventKind::ScrollDown, View::Article) => {
-                    Some(Controls::Scroll(Direction::ThreeDown))
+                    Some(Controls::Scroll(Direction::Down, 3))
                 }
                 (MouseEventKind::ScrollUp, View::Feed) => Some(Controls::MoveSelect(Direction::Up)),
                 (MouseEventKind::ScrollDown, View::Feed) => {

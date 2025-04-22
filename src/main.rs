@@ -5,7 +5,9 @@ mod input;
 use backend::get_article;
 use chrono::NaiveDateTime;
 use crossterm::{
-    QueueableCommand, cursor, event, execute,
+    QueueableCommand, cursor,
+    event::{self, Event},
+    execute,
     terminal::{self, ClearType},
 };
 use frontend::{Components, Geometry, TextPad};
@@ -30,6 +32,127 @@ pub struct Feed {
     time: NaiveDateTime,
     items: Vec<FeedItem>,
     selected: usize,
+}
+
+trait Runnable {
+    fn handle_input(&mut self, event: Event) -> io::Result<bool>;
+    fn run(&mut self) -> io::Result<()> {
+        let mut should_run = true;
+        while should_run {
+            if event::poll(Duration::ZERO)? {
+                should_run = self.handle_input(event::read()?)?;
+            }
+            thread::sleep(Duration::from_millis(16));
+        }
+        Ok(())
+    }
+}
+
+struct ArticleControler<'a> {
+    textpad: TextPad<'a>,
+    input: InputBuffer,
+}
+
+impl<'a> ArticleControler<'a> {
+    pub fn build(content: Vec<Components>, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
+        let mut stdout = stdout();
+        geo.borrow_mut().change_view(View::Article);
+        let textpad = TextPad::new(content, geo)?;
+        textpad.draw(&mut stdout)?;
+        stdout.flush()?;
+        Ok(Self {
+            textpad,
+            input: InputBuffer::new(),
+        })
+    }
+}
+
+impl Runnable for ArticleControler<'_> {
+    fn handle_input(&mut self, event: Event) -> io::Result<bool> {
+        let mut stdout = stdout();
+        match self.input.map(event, View::Article) {
+            Some(Controls::Quit) => return Ok(false),
+            Some(Controls::Resize(new_dimens)) => {
+                self.textpad.resize(new_dimens);
+                self.textpad.draw(&mut stdout)?;
+                stdout.flush()?;
+            }
+            Some(Controls::Scroll(dir, lines)) => {
+                self.scroll(&mut stdout, dir, lines)?;
+                stdout.flush()?;
+            }
+            Some(Controls::GotoTop) => {
+                self.goto_top();
+                self.textpad.draw(&mut stdout)?;
+                stdout.flush()?;
+            }
+            Some(Controls::Select) => {}
+            Some(Controls::MoveSelect(_)) => {}
+            None => {}
+        }
+        Ok(true)
+    }
+}
+
+struct FeedControler<'a> {
+    feed: Feed,
+    textpad: TextPad<'a>,
+    input: InputBuffer,
+}
+
+impl<'a> FeedControler<'a> {
+    pub fn build(feed: Feed, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
+        let content = feed.items.iter().map(|i| i.build()).collect::<Vec<_>>();
+        let textpad = TextPad::new(content, geo)?;
+        let mut feed_controler = Self {
+            feed,
+            textpad,
+            input: InputBuffer::new(),
+        };
+        feed_controler.set_positions();
+        let mut stdout = stdout();
+        feed_controler.textpad.draw(&mut stdout)?;
+        feed_controler.redraw_selected(&mut stdout, true)?;
+        stdout.flush()?;
+        Ok(feed_controler)
+    }
+}
+
+impl Runnable for FeedControler<'_> {
+    fn handle_input(&mut self, event: Event) -> io::Result<bool> {
+        let mut stdout = stdout();
+        match self.input.map(event, View::Feed) {
+            Some(Controls::Quit) => return Ok(false),
+            Some(Controls::MoveSelect(dir)) => {
+                self.select(&mut stdout, dir)?;
+                stdout.flush()?;
+            }
+            Some(Controls::Resize(new_dimens)) => {
+                self.textpad.resize(new_dimens);
+                self.draw(&mut stdout)?;
+                stdout.flush()?;
+            }
+            Some(Controls::Select) => {
+                let url = self.feed.get_selected_url();
+                // TODO: Figure out how to display errors
+                let article = get_article(url).unwrap();
+                ArticleControler::build(article, self.textpad.geo)?.run()?;
+                self.change_view();
+                self.draw(&mut stdout)?;
+                stdout.flush()?;
+            }
+            Some(Controls::GotoTop) => {
+                if self.feed.selected != 0 {
+                    self.goto_top();
+                    self.draw(&mut stdout)?;
+                    stdout.flush()?;
+                }
+            }
+            Some(Controls::Scroll(..)) => {}
+            None => {}
+        }
+        Ok(true)
+    }
 }
 
 struct ScreenState;
@@ -62,96 +185,6 @@ impl Drop for ScreenState {
     }
 }
 
-fn run_article(article: Vec<Components>, geo: &Rc<RefCell<Geometry>>) -> io::Result<()> {
-    let mut stdout = stdout();
-
-    geo.borrow_mut().change_view(View::Article);
-    let body = frontend::build_componenets(&article, geo.borrow().width as usize);
-    let mut article_textpad = TextPad::new(body, geo)?;
-
-    article_textpad.draw(&mut stdout)?;
-    stdout.flush()?;
-
-    let mut to_feed = false;
-    let mut input = InputBuffer::new();
-    while !to_feed {
-        if event::poll(Duration::ZERO)? {
-            match input.map(event::read()?, View::Article) {
-                Some(Controls::Quit) => to_feed = true,
-                Some(Controls::Resize(new_dimens)) => {
-                    geo.borrow_mut().resize(new_dimens);
-                    return run_article(article, geo);
-                }
-                Some(Controls::Scroll(dir)) => {
-                    article_textpad.scroll(&mut stdout, dir, View::Article)?;
-                    stdout.flush()?;
-                }
-                Some(Controls::GotoTop) => {
-                    return run_article(article, geo);
-                }
-                Some(Controls::Select) => {}
-                Some(Controls::MoveSelect(_)) => {}
-                None => {}
-            }
-        }
-        thread::sleep(Duration::from_millis(16));
-    }
-
-    Ok(())
-}
-
-fn run_feed(mut feed: Feed, geo: &Rc<RefCell<Geometry>>) -> io::Result<()> {
-    let mut stdout = stdout();
-
-    let body = frontend::build_componenets(&feed.build(), geo.borrow().width as usize);
-    feed.set_positions(&body);
-    let mut feed_textpad = TextPad::new(body, geo)?;
-
-    feed_textpad.draw(&mut stdout)?;
-    feed.redraw_selected(&mut stdout, &mut feed_textpad, true)?;
-    stdout.flush()?;
-
-    let mut quit = false;
-    let mut input = InputBuffer::new();
-    while !quit {
-        if event::poll(Duration::ZERO)? {
-            match input.map(event::read()?, View::Feed) {
-                Some(Controls::Quit) => quit = true,
-                Some(Controls::MoveSelect(dir)) => {
-                    feed.select(&mut stdout, &mut feed_textpad, dir)?;
-                    stdout.flush()?;
-                }
-                Some(Controls::Resize(new_dimens)) => {
-                    geo.borrow_mut().resize(new_dimens);
-                    // TODO: Figure out a better way to have selected always displayed
-                    feed.selected = 0;
-                    return run_feed(feed, geo);
-                }
-                Some(Controls::Select) => {
-                    let url = feed.get_selected_url();
-                    // TODO: Figure out how to display errors
-                    let article = get_article(url).unwrap();
-                    run_article(article, geo)?;
-                    geo.borrow_mut().change_view(View::Feed);
-                    feed.selected = 0;
-                    return run_feed(feed, geo);
-                }
-                Some(Controls::GotoTop) => {
-                    if feed.selected != 0 {
-                        feed.selected = 0;
-                        return run_feed(feed, geo);
-                    }
-                }
-                Some(Controls::Scroll(_)) => {}
-                None => {}
-            }
-        }
-        thread::sleep(Duration::from_millis(16));
-    }
-
-    Ok(())
-}
-
 // TODO: Add a help command
 fn main() {
     let feed = Feed::new().unwrap_or_else(|err| {
@@ -169,7 +202,11 @@ fn main() {
     });
     let geo = Geometry::new(dimens);
     let geo = Rc::new(RefCell::new(geo));
-    run_feed(feed, &geo).unwrap_or_else(|err| {
+    let mut feed_controler = FeedControler::build(feed, &geo).unwrap_or_else(|err| {
+        eprintln!("Couldn't init the FeedControler: {err}");
+        process::exit(1);
+    });
+    feed_controler.run().unwrap_or_else(|err| {
         eprintln!("Display error: {err}");
         process::exit(1);
     });
