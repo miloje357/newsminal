@@ -1,4 +1,4 @@
-use super::{ArticleError, FeedItem, Scraper};
+use super::{BackendError, FeedItem, Scraper};
 use crate::frontend::Components;
 use chrono::NaiveDateTime;
 use scraper::{Html, Selector};
@@ -13,7 +13,7 @@ impl Scraper for N1 {
         format!("{}najnovije/page/{}", self.get_domain(), page + 1)
     }
 
-    fn parse_article(&self, html: Html) -> Result<Vec<Components>, ArticleError> {
+    fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError> {
         const TITLE_SELCTOR: &str = ".entry-title";
         const CONTENT_SELECTOR: &str = ".entry-content";
         let mut article = Vec::new();
@@ -22,7 +22,7 @@ impl Scraper for N1 {
         let title = html
             .select(&title_selector)
             .next()
-            .ok_or(ArticleError::NoTitle)?
+            .ok_or(BackendError::NoTitle)?
             .text()
             .collect();
         article.push(Components::Title(title));
@@ -31,7 +31,7 @@ impl Scraper for N1 {
         let content = html
             .select(&content_selector)
             .next()
-            .ok_or(ArticleError::NoContent)?
+            .ok_or(BackendError::NoContent)?
             .child_elements();
         for elem in content {
             match elem.value().name() {
@@ -72,14 +72,14 @@ impl Scraper for N1 {
             }
         }
         if article.len() == 1 {
-            return Err(ArticleError::NoContent);
+            return Err(BackendError::NoContent);
         }
 
         Ok(article)
     }
 
     // TODO: Error handling
-    fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, ArticleError> {
+    fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, BackendError> {
         let article_selector = Selector::parse("article").unwrap();
         let link_selector = Selector::parse("a").unwrap();
         let title_selector = Selector::parse("h3").unwrap();

@@ -1,7 +1,11 @@
 mod controllers;
 
-use crate::{FeedItem, View};
-use crossterm::{QueueableCommand, cursor, style::Stylize, terminal};
+use crate::{ErrorWindow, FeedItem, View};
+use crossterm::{
+    QueueableCommand, cursor,
+    style::{PrintStyledContent, Stylize},
+    terminal,
+};
 use std::{
     cell::RefCell,
     io::{self, Write},
@@ -59,6 +63,7 @@ impl Geometry {
         self.max_width = match view {
             View::Feed => Self::FEED_WIDTH,
             View::Article => Self::ARTICLE_WIDTH,
+            View::Error => Self::ARTICLE_WIDTH,
         };
         self.width = self.max_width.min(self.term_width);
         self.startx = (self.term_width - self.width) / 2;
@@ -174,8 +179,6 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
 }
 
 pub trait Component {
-    // NOTE: To implement scrolling correctly you must not use cursor::Move commands
-    // TODO: Add an assert command to check the above note
     fn build(text: &str, width: usize) -> Vec<String>;
 }
 
@@ -257,6 +260,29 @@ impl FeedItem {
 }
 
 // TODO: Add the List component
+
+impl ErrorWindow<'_> {
+    pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
+        let geo = self.geo.borrow();
+        let component = vec![self.msg.clone()];
+        let component = Components::Boxed(component);
+        let lines = build_componenets(&[component], geo.width as usize);
+
+        let starty = (geo.term_height - lines.len() as u16) / 2;
+        qc.queue(terminal::Clear(terminal::ClearType::All))?
+            .queue(cursor::MoveTo(geo.startx, starty))?;
+        for line in lines {
+            qc.queue(PrintStyledContent(line.red()))?
+                .queue(cursor::MoveDown(1))?
+                .queue(cursor::MoveToColumn(geo.startx))?;
+        }
+        Ok(())
+    }
+
+    pub fn resize(&self, term_dimens: (u16, u16)) {
+        self.geo.borrow_mut().resize(term_dimens);
+    }
+}
 
 #[cfg(test)]
 mod tests;

@@ -7,28 +7,25 @@ use scraper::Html;
 use std::{error::Error, fmt::Display};
 
 #[derive(Debug)]
-struct NoScraper;
-impl Error for NoScraper {}
-impl Display for NoScraper {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "No support for this site")
-    }
-}
-
-#[derive(Debug)]
-pub enum ArticleError {
+pub enum BackendError {
+    NoScraper,
     NoTitle,
     NoContent,
     ServerError(String),
+    FeedError,
 }
 
-impl Error for ArticleError {}
-impl Display for ArticleError {
+impl Error for BackendError {}
+impl Display for BackendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ArticleError::NoTitle => write!(f, "No title in the HTML"),
-            ArticleError::NoContent => write!(f, "No content in the HTML"),
-            ArticleError::ServerError(err) => write!(f, "Server returned an error: {err}"),
+            BackendError::NoTitle => write!(f, "Couldn't scrape title from article HTML"),
+            BackendError::NoContent => write!(f, "Couldn't scrape paragraphs from article HTML"),
+            BackendError::ServerError(err) => write!(f, "Server returned an error: {err}"),
+            BackendError::FeedError => {
+                write!(f, "Couldn't get any articles from feed (check logs)")
+            }
+            BackendError::NoScraper => write!(f, "No support for this site"),
         }
     }
 }
@@ -40,7 +37,7 @@ pub fn get_article(url: &str) -> Result<Vec<Components>, Box<dyn Error>> {
     let scr = scrapers
         .into_iter()
         .find(|scr| url.starts_with(scr.get_domain()))
-        .ok_or(NoScraper)?;
+        .ok_or(BackendError::NoScraper)?;
 
     let html = reqwest::blocking::get(url)?;
     match html.error_for_status() {
@@ -48,15 +45,15 @@ pub fn get_article(url: &str) -> Result<Vec<Components>, Box<dyn Error>> {
             let html = Html::parse_document(&html.text()?);
             Ok(scr.parse_article(html)?)
         }
-        Err(err) => Err(Box::new(ArticleError::ServerError(err.to_string()))),
+        Err(err) => Err(Box::new(BackendError::ServerError(err.to_string()))),
     }
 }
 
 trait Scraper {
     fn get_domain(&self) -> &str;
     fn get_feed_url(&self, page: usize) -> String;
-    fn parse_article(&self, html: Html) -> Result<Vec<Components>, ArticleError>;
-    fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, ArticleError>;
+    fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError>;
+    fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, BackendError>;
 }
 
 impl Feed {
@@ -74,22 +71,14 @@ impl Feed {
         for scr in scrapers {
             let url = scr.get_feed_url(0);
             match Self::get_feed_site(&url, scr) {
-                Ok(new_feed_items) => {
-                    feed_items.extend(new_feed_items);
-                }
-                // TODO: Handle errors better
-                Err(err) => {
-                    let title = format!("Couldn't get articles from {}: {err}", url);
-                    feed_items.push(FeedItem {
-                        url: None,
-                        title,
-                        published: None,
-                        at: None,
-                    })
-                }
+                Ok(new_feed_items) => feed_items.extend(new_feed_items),
+                Err(err) => eprintln!("Couldn't get articles from: {err}"),
             }
         }
 
+        if feed_items.is_empty() {
+            return Err(Box::new(BackendError::FeedError));
+        }
         Ok(Feed {
             time: Utc::now().naive_utc(),
             items: feed_items,

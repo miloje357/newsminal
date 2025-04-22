@@ -6,7 +6,7 @@ use crossterm::{
 };
 
 use crate::{
-    ArticleControler, FeedControler, Runnable,
+    ArticleControler, ErrorWindow, FeedControler, Runnable,
     backend::get_article,
     input::{Direction, View},
 };
@@ -192,9 +192,14 @@ impl FeedControler<'_> {
         // TODO: Add a loading page
         self.input.clear();
         let url = self.feed.get_selected_url();
-        // TODO: Figure out how to display errors
-        let article = get_article(url).unwrap();
-        ArticleControler::build(article, self.textpad.geo)?.run()?;
+        match get_article(url) {
+            Ok(article) => ArticleControler::build(article, self.textpad.geo)?.run()?,
+            Err(err) => ErrorWindow::build(
+                &format!("Couldn't get article content: {err}"),
+                self.textpad.geo,
+            )?
+            .run()?,
+        }
         self.change_view();
         self.draw(&mut qc)?;
         Ok(())

@@ -18,6 +18,7 @@ pub enum Controls {
 pub enum View {
     Feed,
     Article,
+    Error,
 }
 
 pub struct InputBuffer {

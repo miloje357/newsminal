@@ -7,14 +7,14 @@ use crossterm::{
     QueueableCommand, cursor,
     event::{self, Event},
     execute,
-    terminal::{self, ClearType},
+    terminal::{self, ClearType, disable_raw_mode},
 };
 use frontend::{Components, Geometry, TextPad};
 use input::*;
 use std::{
     cell::RefCell,
     io::{self, Write, stdout},
-    process,
+    panic, process,
     rc::Rc,
     thread,
     time::Duration,
@@ -44,6 +44,42 @@ trait Runnable {
             thread::sleep(Duration::from_millis(16));
         }
         Ok(())
+    }
+}
+
+struct ErrorWindow<'a> {
+    msg: String,
+    geo: &'a Rc<RefCell<Geometry>>,
+    input: InputBuffer,
+}
+
+impl<'a> ErrorWindow<'a> {
+    pub fn build(msg: &str, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
+        let mut stdout = stdout();
+        let error_window = Self {
+            msg: format!("(ERROR) {msg}"),
+            geo,
+            input: InputBuffer::new(),
+        };
+        error_window.draw(&mut stdout)?;
+        stdout.flush()?;
+        Ok(error_window)
+    }
+}
+
+impl Runnable for ErrorWindow<'_> {
+    fn handle_input(&mut self, event: Event) -> io::Result<bool> {
+        let mut stdout = stdout();
+        match self.input.map(event, View::Error) {
+            Some(Controls::Quit) => return Ok(false),
+            Some(Controls::Resize(new_dimens)) => {
+                self.resize(new_dimens);
+                self.draw(&mut stdout)?;
+                stdout.flush()?;
+            }
+            _ => {}
+        }
+        Ok(true)
     }
 }
 
@@ -177,9 +213,7 @@ impl Drop for ScreenState {
             stdout(),
             event::DisableMouseCapture,
             terminal::LeaveAlternateScreen,
-            terminal::Clear(ClearType::All),
             cursor::Show,
-            cursor::MoveTo(0, 0)
         )
         .unwrap_or_else(|err| eprintln!("Display error: {err}"));
         terminal::disable_raw_mode()
@@ -188,11 +222,19 @@ impl Drop for ScreenState {
 }
 
 // TODO: Add a help command
+// TODO: Implement a logger
 fn main() {
     let feed = Feed::new().unwrap_or_else(|err| {
         eprintln!("Couldn't get feed: {err}");
         process::exit(1);
     });
+
+    panic::set_hook(Box::new(|info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(stdout(), terminal::LeaveAlternateScreen);
+        let _ = stdout().flush();
+        eprintln!("Panic occurred: {}", info);
+    }));
 
     let _screen_state = ScreenState::enable().unwrap_or_else(|err| {
         eprintln!("Couldn't setup screen state: {err}");
