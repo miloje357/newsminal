@@ -6,7 +6,8 @@ use crossterm::{
 };
 
 use crate::{
-    ArticleControler, FeedControler,
+    ArticleControler, FeedControler, Runnable,
+    backend::get_article,
     input::{Direction, View},
 };
 
@@ -92,7 +93,7 @@ impl FeedControler<'_> {
         Ok(())
     }
 
-    pub fn select(
+    pub fn move_select(
         &mut self,
         mut qc: impl QueueableCommand + Write,
         dir: Direction,
@@ -159,5 +160,43 @@ impl FeedControler<'_> {
     pub fn goto_top(&mut self) {
         self.feed.selected = 0;
         self.textpad.first = 0;
+    }
+
+    pub fn mouse_select(
+        &mut self,
+        mut qc: impl QueueableCommand + Write,
+        x: u16,
+        y: u16,
+    ) -> io::Result<bool> {
+        let geo = self.textpad.geo.borrow();
+        let x = x as i16 - geo.startx as i16;
+        if x < 0 || x > geo.width as i16 {
+            return Ok(false);
+        }
+        self.redraw_selected(&mut qc, false)?;
+        // TODO: Optimize
+        let last_selected = self.feed.selected;
+        if let Some(selected) = self
+            .feed
+            .items
+            .iter()
+            .position(|i| y + self.textpad.first < i.at.unwrap() as u16)
+        {
+            self.feed.selected = selected - 1;
+        }
+        self.redraw_selected(&mut qc, true)?;
+        Ok(self.feed.selected == last_selected)
+    }
+
+    pub fn select(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
+        // TODO: Add a loading page
+        self.input.clear();
+        let url = self.feed.get_selected_url();
+        // TODO: Figure out how to display errors
+        let article = get_article(url).unwrap();
+        ArticleControler::build(article, self.textpad.geo)?.run()?;
+        self.change_view();
+        self.draw(&mut qc)?;
+        Ok(())
     }
 }

@@ -1,4 +1,4 @@
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 
 pub enum Direction {
     Up,
@@ -11,6 +11,7 @@ pub enum Controls {
     MoveSelect(Direction),
     Scroll(Direction, u16),
     Select,
+    MouseSelect(u16, u16),
     GotoTop,
 }
 
@@ -28,6 +29,10 @@ impl InputBuffer {
         Self {
             char_buffer: vec![],
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.char_buffer.clear();
     }
 
     fn map_key(&mut self, c: char, view: View) -> Option<Controls> {
@@ -86,7 +91,10 @@ impl InputBuffer {
                 (MouseEventKind::ScrollDown, View::Feed) => {
                     Some(Controls::MoveSelect(Direction::Down))
                 }
-                // TODO: Add mouse select
+                (MouseEventKind::Down(MouseButton::Left), View::Feed) => {
+                    Some(Controls::MouseSelect(event.column, event.row))
+                }
+                (MouseEventKind::Down(MouseButton::Right), _) => Some(Controls::Quit),
                 _ => None,
             },
             _ => None,

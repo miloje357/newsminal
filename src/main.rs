@@ -2,7 +2,6 @@ mod backend;
 mod frontend;
 mod input;
 
-use backend::get_article;
 use chrono::NaiveDateTime;
 use crossterm::{
     QueueableCommand, cursor,
@@ -88,6 +87,7 @@ impl Runnable for ArticleControler<'_> {
             }
             Some(Controls::Select) => {}
             Some(Controls::MoveSelect(_)) => {}
+            Some(Controls::MouseSelect(..)) => {}
             None => {}
         }
         Ok(true)
@@ -124,7 +124,7 @@ impl Runnable for FeedControler<'_> {
         match self.input.map(event, View::Feed) {
             Some(Controls::Quit) => return Ok(false),
             Some(Controls::MoveSelect(dir)) => {
-                self.select(&mut stdout, dir)?;
+                self.move_select(&mut stdout, dir)?;
                 stdout.flush()?;
             }
             Some(Controls::Resize(new_dimens)) => {
@@ -133,12 +133,7 @@ impl Runnable for FeedControler<'_> {
                 stdout.flush()?;
             }
             Some(Controls::Select) => {
-                let url = self.feed.get_selected_url();
-                // TODO: Figure out how to display errors
-                let article = get_article(url).unwrap();
-                ArticleControler::build(article, self.textpad.geo)?.run()?;
-                self.change_view();
-                self.draw(&mut stdout)?;
+                self.select(&mut stdout)?;
                 stdout.flush()?;
             }
             Some(Controls::GotoTop) => {
@@ -147,6 +142,13 @@ impl Runnable for FeedControler<'_> {
                     self.draw(&mut stdout)?;
                     stdout.flush()?;
                 }
+            }
+            Some(Controls::MouseSelect(column, row)) => {
+                let should_select = self.mouse_select(&mut stdout, column, row)?;
+                if should_select {
+                    self.select(&mut stdout)?;
+                }
+                stdout.flush()?;
             }
             Some(Controls::Scroll(..)) => {}
             None => {}
