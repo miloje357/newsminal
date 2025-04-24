@@ -62,6 +62,7 @@ impl FeedControler<'_> {
         }
         Ok(())
     }
+
     pub fn redraw_selected(
         &self,
         mut qc: impl QueueableCommand + Write,
@@ -145,10 +146,7 @@ impl FeedControler<'_> {
 
     pub fn change_view(&mut self) {
         self.textpad.geo.borrow_mut().change_view(View::Feed);
-        self.textpad.content = build_componenets(
-            &self.textpad.components,
-            self.textpad.geo.borrow().width as usize,
-        );
+        self.textpad.build();
     }
 
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
@@ -184,8 +182,25 @@ impl FeedControler<'_> {
         {
             self.feed.selected = selected - 1;
         }
+        // TODO: Add scrolling when selected is out of bounds
         self.redraw_selected(&mut qc, true)?;
         Ok(self.feed.selected == last_selected)
+    }
+
+    pub fn refresh(&mut self, is_manual: bool) {
+        let num_new = self.feed.refresh(is_manual);
+        if num_new == Some(0) {
+            return;
+        }
+        if let Some(num_new) = num_new {
+            let new_comps = self.feed.items.iter().take(num_new).map(|i| i.build());
+            for comp in new_comps {
+                self.textpad.components.push_front(comp);
+            }
+            self.textpad.build();
+            // BUG: Sometimes doesn't set FeedItem.at correctly
+            self.set_positions();
+        }
     }
 
     pub fn select(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
@@ -200,6 +215,7 @@ impl FeedControler<'_> {
             )?
             .run()?,
         }
+        self.refresh(false);
         self.change_view();
         self.draw(&mut qc)?;
         Ok(())

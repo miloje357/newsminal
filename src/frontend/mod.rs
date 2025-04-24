@@ -8,6 +8,7 @@ use crossterm::{
 };
 use std::{
     cell::RefCell,
+    collections::VecDeque,
     io::{self, Write},
     rc::Rc,
 };
@@ -79,7 +80,8 @@ impl Geometry {
 }
 
 pub struct TextPad<'a> {
-    components: Vec<Components>,
+    components: VecDeque<Components>,
+    // TODO: content: VecDeque<String>??
     content: Vec<String>,
     first: u16,
     pub geo: &'a Rc<RefCell<Geometry>>,
@@ -89,15 +91,25 @@ impl<'a> TextPad<'a> {
     pub fn new(components: Vec<Components>, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
         Ok(Self {
             content: build_componenets(&components, geo.borrow().width as usize),
-            components,
+            components: components.into(),
             first: 0,
             geo,
         })
     }
 
+    fn build(&mut self) {
+        // TODO:
+        let width = self.geo.borrow().width as usize;
+        let (first, last) = self.components.as_slices();
+        let first = build_componenets(first, width);
+        let last = build_componenets(last, width);
+        self.content = first;
+        self.content.extend(last);
+    }
+
     pub fn resize(&mut self, term_dimens: (u16, u16)) {
         self.geo.borrow_mut().resize(term_dimens);
-        self.content = build_componenets(&self.components, self.geo.borrow().width as usize);
+        self.build();
     }
 
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {

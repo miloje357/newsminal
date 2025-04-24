@@ -13,6 +13,7 @@ pub enum Controls {
     Select,
     MouseSelect(u16, u16),
     GotoTop,
+    Refresh,
 }
 
 pub enum View {
@@ -45,6 +46,7 @@ impl InputBuffer {
             (['j'], View::Article) => Some(Controls::Scroll(Direction::Down, 1)),
             (['q'], _) => Some(Controls::Quit),
             (['g', 'g'], _) => Some(Controls::GotoTop),
+            (['r'], View::Feed) => Some(Controls::Refresh),
             // TODO: Consider adding Controls::GotoBottom
             _ => None,
         };

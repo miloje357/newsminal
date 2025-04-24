@@ -13,6 +13,7 @@ use frontend::{Components, Geometry, TextPad};
 use input::*;
 use std::{
     cell::RefCell,
+    collections::VecDeque,
     io::{self, Write, stdout},
     panic, process,
     rc::Rc,
@@ -29,7 +30,7 @@ struct FeedItem {
 
 pub struct Feed {
     time: NaiveDateTime,
-    items: Vec<FeedItem>,
+    items: VecDeque<FeedItem>,
     selected: usize,
 }
 
@@ -124,6 +125,7 @@ impl Runnable for ArticleControler<'_> {
             Some(Controls::Select) => {}
             Some(Controls::MoveSelect(_)) => {}
             Some(Controls::MouseSelect(..)) => {}
+            Some(Controls::Refresh) => {}
             None => {}
         }
         Ok(true)
@@ -184,6 +186,11 @@ impl Runnable for FeedControler<'_> {
                 if should_select {
                     self.select(&mut stdout)?;
                 }
+                stdout.flush()?;
+            }
+            Some(Controls::Refresh) => {
+                self.refresh(true);
+                self.draw(&mut stdout)?;
                 stdout.flush()?;
             }
             Some(Controls::Scroll(..)) => {}

@@ -18,7 +18,6 @@ Then move the resulting binary (found in target/release/) into a directory in yo
 
 ## TODOs
  - Add more scrapers (Insajder, Nova, Danas, Politika, ...)
- - Add feed refreshing
  - Add article caching
  - Add scraping from multiple pages of the same source
  - Add filtering by topic
