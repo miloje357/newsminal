@@ -78,7 +78,6 @@ impl Scraper for N1 {
         Ok(article)
     }
 
-    // TODO: Error handling
     fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, BackendError> {
         let article_selector = Selector::parse("article").unwrap();
         let link_selector = Selector::parse("a").unwrap();

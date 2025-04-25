@@ -189,7 +189,7 @@ impl Runnable for FeedControler<'_> {
                 stdout.flush()?;
             }
             Some(Controls::Refresh) => {
-                self.refresh(true);
+                self.refresh(&mut stdout, true)?;
                 self.draw(&mut stdout)?;
                 stdout.flush()?;
             }
@@ -229,7 +229,6 @@ impl Drop for ScreenState {
 }
 
 // TODO: Add a help command
-// TODO: Implement a logger
 fn main() {
     let feed = Feed::new().unwrap_or_else(|err| {
         eprintln!("Couldn't get feed: {err}");

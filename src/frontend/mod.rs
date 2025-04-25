@@ -81,7 +81,6 @@ impl Geometry {
 
 pub struct TextPad<'a> {
     components: VecDeque<Components>,
-    // TODO: content: VecDeque<String>??
     content: Vec<String>,
     first: u16,
     pub geo: &'a Rc<RefCell<Geometry>>,
@@ -98,7 +97,6 @@ impl<'a> TextPad<'a> {
     }
 
     fn build(&mut self) {
-        // TODO:
         let width = self.geo.borrow().width as usize;
         let (first, last) = self.components.as_slices();
         let first = build_componenets(first, width);

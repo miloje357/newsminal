@@ -37,6 +37,7 @@ impl InputBuffer {
         self.char_buffer.clear();
     }
 
+    // BUG: Should also clear when an invalid key combo is given
     fn map_key(&mut self, c: char, view: View) -> Option<Controls> {
         self.char_buffer.push(c);
         let control = match (self.char_buffer.as_slice(), view) {

@@ -11,8 +11,6 @@ use crate::{
     input::{Direction, View},
 };
 
-use super::build_componenets;
-
 impl ArticleControler<'_> {
     pub fn scroll(
         &mut self,
@@ -144,11 +142,6 @@ impl FeedControler<'_> {
         }
     }
 
-    pub fn change_view(&mut self) {
-        self.textpad.geo.borrow_mut().change_view(View::Feed);
-        self.textpad.build();
-    }
-
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
         self.textpad.draw(&mut qc)?;
         self.redraw_selected(&mut qc, true)?;
@@ -187,20 +180,30 @@ impl FeedControler<'_> {
         Ok(self.feed.selected == last_selected)
     }
 
-    pub fn refresh(&mut self, is_manual: bool) {
+    pub fn refresh(
+        &mut self,
+        mut qc: impl QueueableCommand + Write,
+        is_manual: bool,
+    ) -> io::Result<()> {
         let num_new = self.feed.refresh(is_manual);
         if num_new == Some(0) {
-            return;
+            return Ok(());
         }
         if let Some(num_new) = num_new {
             let new_comps = self.feed.items.iter().take(num_new).map(|i| i.build());
             for comp in new_comps {
                 self.textpad.components.push_front(comp);
             }
+            self.textpad.geo.borrow_mut().change_view(View::Feed);
             self.textpad.build();
-            // BUG: Sometimes doesn't set FeedItem.at correctly
             self.set_positions();
+            self.feed.selected += num_new;
+            if self.textpad.first != 0 {
+                self.textpad
+                    .scroll_by_lines(&mut qc, self.feed.items[num_new].at.unwrap() as i16)?;
+            }
         }
+        Ok(())
     }
 
     pub fn select(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
@@ -215,8 +218,8 @@ impl FeedControler<'_> {
             )?
             .run()?,
         }
-        self.refresh(false);
-        self.change_view();
+        self.refresh(&mut qc, false)?;
+        self.textpad.geo.borrow_mut().change_view(View::Feed);
         self.draw(&mut qc)?;
         Ok(())
     }
