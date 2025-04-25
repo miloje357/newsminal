@@ -175,7 +175,7 @@ impl FeedControler<'_> {
         {
             self.feed.selected = selected - 1;
         }
-        // TODO: Add scrolling when selected is out of bounds
+        // FIXME: Add scrolling when selected is out of bounds
         self.redraw_selected(&mut qc, true)?;
         Ok(self.feed.selected == last_selected)
     }

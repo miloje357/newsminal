@@ -1,10 +1,12 @@
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
 
+#[derive(Clone, Copy)]
 pub enum Direction {
     Up,
     Down,
 }
 
+#[derive(Clone, Copy)]
 pub enum Controls {
     Quit,
     Resize((u16, u16)),
@@ -16,6 +18,7 @@ pub enum Controls {
     Refresh,
 }
 
+#[derive(Clone, Copy)]
 pub enum View {
     Feed,
     Article,
@@ -37,9 +40,12 @@ impl InputBuffer {
         self.char_buffer.clear();
     }
 
-    // BUG: Should also clear when an invalid key combo is given
     fn map_key(&mut self, c: char, view: View) -> Option<Controls> {
         self.char_buffer.push(c);
+        match self.char_buffer.as_slice() {
+            ['g'] => return None,
+            _ => {}
+        };
         let control = match (self.char_buffer.as_slice(), view) {
             (['k'], View::Feed) => Some(Controls::MoveSelect(Direction::Up)),
             (['k'], View::Article) => Some(Controls::Scroll(Direction::Up, 1)),
@@ -51,9 +57,13 @@ impl InputBuffer {
             // TODO: Consider adding Controls::GotoBottom
             _ => None,
         };
-        if control.is_some() {
-            self.char_buffer.clear();
+        if self.char_buffer.len() > 1 {
+            if let (None, Some(c)) = (control, self.char_buffer.pop()) {
+                self.char_buffer.clear();
+                return self.map_key(c, view);
+            }
         }
+        self.char_buffer.clear();
         return control;
     }
 
