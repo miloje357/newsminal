@@ -187,7 +187,6 @@ impl FeedControler<'_> {
         mut qc: impl QueueableCommand + Write,
         is_manual: bool,
     ) -> io::Result<()> {
-        // FIXME: Short circuit here and not in feed.refresh
         let num_new = self.feed.refresh(is_manual);
         if num_new == Some(0) {
             return Ok(());
@@ -214,12 +213,14 @@ impl FeedControler<'_> {
         self.input.clear();
         let url = self.feed.get_selected_url();
         match get_article(url) {
-            Ok(article) => ArticleControler::build(article, self.textpad.geo)?.run()?,
+            Ok(article) => {
+                ArticleControler::build(article, self.textpad.geo, &mut qc)?.run(&mut qc)?
+            }
             Err(err) => ErrorWindow::build(
                 &format!("Couldn't get article content: {err}"),
                 self.textpad.geo,
             )?
-            .run()?,
+            .run(&mut qc)?,
         }
         self.refresh(&mut qc, false)?;
         self.textpad.geo.borrow_mut().change_view(View::Feed);
@@ -240,7 +241,7 @@ impl FeedControler<'_> {
             }
             Err(err) => {
                 ErrorWindow::build(&format!("Couldn't get next page: {err}"), self.textpad.geo)?
-                    .run()?
+                    .run(qc)?
             }
         }
         Ok(())

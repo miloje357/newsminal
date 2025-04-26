@@ -36,13 +36,13 @@ pub struct Feed {
 }
 
 trait Runnable {
-    fn handle_input(&mut self, event: Event) -> io::Result<bool>;
-    // FIXME: Make run take qc
-    fn run(&mut self) -> io::Result<()> {
+    fn handle_input(&mut self, event: Event, qc: impl QueueableCommand + Write)
+    -> io::Result<bool>;
+    fn run(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
         let mut should_run = true;
         while should_run {
             if event::poll(Duration::ZERO)? {
-                should_run = self.handle_input(event::read()?)?;
+                should_run = self.handle_input(event::read()?, &mut qc)?;
             }
             thread::sleep(Duration::from_millis(16));
         }
@@ -71,14 +71,17 @@ impl<'a> ErrorWindow<'a> {
 }
 
 impl Runnable for ErrorWindow<'_> {
-    fn handle_input(&mut self, event: Event) -> io::Result<bool> {
-        let mut stdout = stdout();
+    fn handle_input(
+        &mut self,
+        event: Event,
+        mut qc: impl QueueableCommand + Write,
+    ) -> io::Result<bool> {
         match self.input.map(event, View::Error) {
             Some(Controls::Quit) => return Ok(false),
             Some(Controls::Resize(new_dimens)) => {
                 self.resize(new_dimens);
-                self.draw(&mut stdout)?;
-                stdout.flush()?;
+                self.draw(&mut qc)?;
+                qc.flush()?;
             }
             _ => {}
         }
@@ -92,12 +95,15 @@ struct ArticleControler<'a> {
 }
 
 impl<'a> ArticleControler<'a> {
-    pub fn build(content: Vec<Components>, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
-        let mut stdout = stdout();
+    pub fn build(
+        content: Vec<Components>,
+        geo: &'a Rc<RefCell<Geometry>>,
+        mut qc: impl QueueableCommand + Write,
+    ) -> io::Result<Self> {
         geo.borrow_mut().change_view(View::Article);
         let textpad = TextPad::new(content, geo)?;
-        textpad.draw(&mut stdout)?;
-        stdout.flush()?;
+        textpad.draw(&mut qc)?;
+        qc.flush()?;
         Ok(Self {
             textpad,
             input: InputBuffer::new(),
@@ -106,23 +112,26 @@ impl<'a> ArticleControler<'a> {
 }
 
 impl Runnable for ArticleControler<'_> {
-    fn handle_input(&mut self, event: Event) -> io::Result<bool> {
-        let mut stdout = stdout();
+    fn handle_input(
+        &mut self,
+        event: Event,
+        mut qc: impl QueueableCommand + Write,
+    ) -> io::Result<bool> {
         match self.input.map(event, View::Article) {
             Some(Controls::Quit) => return Ok(false),
             Some(Controls::Resize(new_dimens)) => {
                 self.textpad.resize(new_dimens);
-                self.textpad.draw(&mut stdout)?;
-                stdout.flush()?;
+                self.textpad.draw(&mut qc)?;
+                qc.flush()?;
             }
             Some(Controls::Scroll(dir, lines)) => {
-                self.scroll(&mut stdout, dir, lines)?;
-                stdout.flush()?;
+                self.scroll(&mut qc, dir, lines)?;
+                qc.flush()?;
             }
             Some(Controls::GotoTop) => {
                 self.goto_top();
-                self.textpad.draw(&mut stdout)?;
-                stdout.flush()?;
+                self.textpad.draw(&mut qc)?;
+                qc.flush()?;
             }
             Some(Controls::Select) => {}
             Some(Controls::MoveSelect(_)) => {}
@@ -141,7 +150,11 @@ struct FeedControler<'a> {
 }
 
 impl<'a> FeedControler<'a> {
-    pub fn build(feed: Feed, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
+    pub fn build(
+        feed: Feed,
+        geo: &'a Rc<RefCell<Geometry>>,
+        mut qc: impl QueueableCommand + Write,
+    ) -> io::Result<Self> {
         let content = feed.items.iter().map(|i| i.build()).collect::<Vec<_>>();
         let textpad = TextPad::new(content, geo)?;
         let mut feed_controler = Self {
@@ -150,54 +163,56 @@ impl<'a> FeedControler<'a> {
             input: InputBuffer::new(),
         };
         feed_controler.set_positions();
-        let mut stdout = stdout();
-        feed_controler.textpad.draw(&mut stdout)?;
-        feed_controler.redraw_selected(&mut stdout, true)?;
-        stdout.flush()?;
+        feed_controler.textpad.draw(&mut qc)?;
+        feed_controler.redraw_selected(&mut qc, true)?;
+        qc.flush()?;
         Ok(feed_controler)
     }
 }
 
 impl Runnable for FeedControler<'_> {
-    fn handle_input(&mut self, event: Event) -> io::Result<bool> {
-        let mut stdout = stdout();
+    fn handle_input(
+        &mut self,
+        event: Event,
+        mut qc: impl QueueableCommand + Write,
+    ) -> io::Result<bool> {
         match self.input.map(event, View::Feed) {
             Some(Controls::Quit) => return Ok(false),
             Some(Controls::MoveSelect(dir)) => {
-                let should_append = self.move_select(&mut stdout, dir)?;
+                let should_append = self.move_select(&mut qc, dir)?;
                 if should_append {
-                    self.append(&mut stdout)?;
-                    self.move_select(&mut stdout, dir)?;
+                    self.append(&mut qc)?;
+                    self.move_select(&mut qc, dir)?;
                 }
-                stdout.flush()?;
+                qc.flush()?;
             }
             Some(Controls::Resize(new_dimens)) => {
                 self.textpad.resize(new_dimens);
-                self.draw(&mut stdout)?;
-                stdout.flush()?;
+                self.draw(&mut qc)?;
+                qc.flush()?;
             }
             Some(Controls::Select) => {
-                self.select(&mut stdout)?;
-                stdout.flush()?;
+                self.select(&mut qc)?;
+                qc.flush()?;
             }
             Some(Controls::GotoTop) => {
                 if self.feed.selected != 0 {
                     self.goto_top();
-                    self.draw(&mut stdout)?;
-                    stdout.flush()?;
+                    self.draw(&mut qc)?;
+                    qc.flush()?;
                 }
             }
             Some(Controls::MouseSelect(column, row)) => {
-                let should_select = self.mouse_select(&mut stdout, column, row)?;
+                let should_select = self.mouse_select(&mut qc, column, row)?;
                 if should_select {
-                    self.select(&mut stdout)?;
+                    self.select(&mut qc)?;
                 }
-                stdout.flush()?;
+                qc.flush()?;
             }
             Some(Controls::Refresh) => {
-                self.refresh(&mut stdout, true)?;
-                self.draw(&mut stdout)?;
-                stdout.flush()?;
+                self.refresh(&mut qc, true)?;
+                self.draw(&mut qc)?;
+                qc.flush()?;
             }
             Some(Controls::Scroll(..)) => {}
             None => {}
@@ -258,11 +273,12 @@ fn main() {
     });
     let geo = Geometry::new(dimens);
     let geo = Rc::new(RefCell::new(geo));
-    let mut feed_controler = FeedControler::build(feed, &geo).unwrap_or_else(|err| {
+    let mut stdout = stdout();
+    let mut feed_controler = FeedControler::build(feed, &geo, &mut stdout).unwrap_or_else(|err| {
         eprintln!("Couldn't init the FeedControler: {err}");
         process::exit(1);
     });
-    feed_controler.run().unwrap_or_else(|err| {
+    feed_controler.run(&mut stdout).unwrap_or_else(|err| {
         eprintln!("Display error: {err}");
         process::exit(1);
     });
