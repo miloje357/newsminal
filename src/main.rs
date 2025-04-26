@@ -21,7 +21,7 @@ use std::{
     time::Duration,
 };
 
-struct FeedItem {
+pub struct FeedItem {
     url: Option<String>,
     title: String,
     published: Option<NaiveDateTime>,
@@ -32,10 +32,12 @@ pub struct Feed {
     time: NaiveDateTime,
     items: VecDeque<FeedItem>,
     selected: usize,
+    page: usize,
 }
 
 trait Runnable {
     fn handle_input(&mut self, event: Event) -> io::Result<bool>;
+    // FIXME: Make run take qc
     fn run(&mut self) -> io::Result<()> {
         let mut should_run = true;
         while should_run {
@@ -162,7 +164,11 @@ impl Runnable for FeedControler<'_> {
         match self.input.map(event, View::Feed) {
             Some(Controls::Quit) => return Ok(false),
             Some(Controls::MoveSelect(dir)) => {
-                self.move_select(&mut stdout, dir)?;
+                let should_append = self.move_select(&mut stdout, dir)?;
+                if should_append {
+                    self.append(&mut stdout)?;
+                    self.move_select(&mut stdout, dir)?;
+                }
                 stdout.flush()?;
             }
             Some(Controls::Resize(new_dimens)) => {

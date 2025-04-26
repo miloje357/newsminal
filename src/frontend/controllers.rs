@@ -96,7 +96,7 @@ impl FeedControler<'_> {
         &mut self,
         mut qc: impl QueueableCommand + Write,
         dir: Direction,
-    ) -> io::Result<()> {
+    ) -> io::Result<bool> {
         let term_height = self.textpad.geo.borrow().term_height;
         self.redraw_selected(&mut qc, false)?;
         match dir {
@@ -124,11 +124,13 @@ impl FeedControler<'_> {
                     if next_row - self.textpad.first >= term_height {
                         self.scroll(&mut qc, dir)?;
                     }
+                } else {
+                    return Ok(true);
                 }
             }
         };
         self.redraw_selected(&mut qc, true)?;
-        Ok(())
+        Ok(false)
     }
 
     pub fn set_positions(&mut self) {
@@ -185,6 +187,7 @@ impl FeedControler<'_> {
         mut qc: impl QueueableCommand + Write,
         is_manual: bool,
     ) -> io::Result<()> {
+        // FIXME: Short circuit here and not in feed.refresh
         let num_new = self.feed.refresh(is_manual);
         if num_new == Some(0) {
             return Ok(());
@@ -221,6 +224,25 @@ impl FeedControler<'_> {
         self.refresh(&mut qc, false)?;
         self.textpad.geo.borrow_mut().change_view(View::Feed);
         self.draw(&mut qc)?;
+        Ok(())
+    }
+
+    pub fn append(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
+        let new_feed_items = self.feed.next_page();
+        match new_feed_items {
+            Ok(new_feed_items) => {
+                let new_comps = new_feed_items.iter().map(|i| i.build());
+                self.textpad.components.extend(new_comps);
+                self.feed.items.extend(new_feed_items);
+                self.textpad.build();
+                self.set_positions();
+                self.scroll(&mut qc, Direction::Down)?;
+            }
+            Err(err) => {
+                ErrorWindow::build(&format!("Couldn't get next page: {err}"), self.textpad.geo)?
+                    .run()?
+            }
+        }
         Ok(())
     }
 }

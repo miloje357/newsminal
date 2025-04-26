@@ -65,11 +65,11 @@ impl Feed {
     }
 
     // TODO: Add scraping from multiple pages of the same source
-    fn get_new_items() -> Vec<FeedItem> {
+    fn get_new_items(page: usize) -> Vec<FeedItem> {
         let scrapers = vec![Box::new(N1)];
         let mut feed_items = Vec::new();
         for scr in scrapers {
-            let url = scr.get_feed_url(0);
+            let url = scr.get_feed_url(page);
             match Self::get_feed_site(&url, scr) {
                 Ok(new_feed_items) => feed_items.extend(new_feed_items),
                 Err(err) => eprintln!("Couldn't get articles from: {err}"),
@@ -80,7 +80,7 @@ impl Feed {
     }
 
     pub fn new() -> Result<Self, Box<dyn Error>> {
-        let feed_items = Self::get_new_items();
+        let feed_items = Self::get_new_items(0);
         if feed_items.is_empty() {
             return Err(Box::new(BackendError::FeedError));
         }
@@ -88,6 +88,7 @@ impl Feed {
             time: Utc::now().naive_utc(),
             items: feed_items.into(),
             selected: 0,
+            page: 0,
         })
     }
 
@@ -101,7 +102,7 @@ impl Feed {
             return None;
         }
 
-        let all_articles = Self::get_new_items();
+        let all_articles = Self::get_new_items(0);
         let first = self.items.get(0)?;
         let new_articles: Vec<FeedItem> = all_articles
             .into_iter()
@@ -117,6 +118,15 @@ impl Feed {
             self.items.push_front(new_article);
         }
         Some(num_new)
+    }
+
+    pub fn next_page(&mut self) -> Result<Vec<FeedItem>, BackendError> {
+        self.page += 1;
+        let new_feed_items = Self::get_new_items(self.page);
+        if new_feed_items.is_empty() {
+            return Err(BackendError::FeedError);
+        }
+        Ok(new_feed_items)
     }
 }
 
