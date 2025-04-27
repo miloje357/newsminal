@@ -2,6 +2,7 @@ mod backend;
 mod frontend;
 mod input;
 
+use backend::NewsSite;
 use chrono::NaiveDateTime;
 use crossterm::{
     QueueableCommand, cursor,
@@ -26,6 +27,7 @@ pub struct FeedItem {
     title: String,
     published: Option<NaiveDateTime>,
     at: Option<usize>,
+    scraper: Box<dyn NewsSite>,
 }
 
 pub struct Feed {

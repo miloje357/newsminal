@@ -7,7 +7,6 @@ use crossterm::{
 
 use crate::{
     ArticleControler, ErrorWindow, FeedControler, Runnable,
-    backend::get_article,
     input::{Direction, View},
 };
 
@@ -211,8 +210,7 @@ impl FeedControler<'_> {
     pub fn select(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
         // TODO: Add a loading page
         self.input.clear();
-        let url = self.feed.get_selected_url();
-        match get_article(url) {
+        match self.feed.selected().get_article() {
             Ok(article) => {
                 ArticleControler::build(article, self.textpad.geo, &mut qc)?.run(&mut qc)?
             }

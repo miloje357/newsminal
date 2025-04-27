@@ -1,7 +1,9 @@
+mod danas;
 mod n1;
 
 use crate::{Feed, FeedItem, frontend::Components};
 use chrono::Utc;
+use danas::Danas;
 use n1::N1;
 use scraper::Html;
 use std::{error::Error, fmt::Display};
@@ -30,52 +32,49 @@ impl Display for BackendError {
     }
 }
 
-// TODO: Add scraper: Box<dyn Scraper> to this function
-pub fn get_article(url: &str) -> Result<Vec<Components>, Box<dyn Error>> {
-    let scrapers: Vec<Box<dyn Scraper>> = vec![Box::new(N1)];
-
-    let scr = scrapers
-        .into_iter()
-        .find(|scr| url.starts_with(scr.get_domain()))
-        .ok_or(BackendError::NoScraper)?;
-
-    let html = reqwest::blocking::get(url)?;
-    match html.error_for_status() {
-        Ok(html) => {
-            let html = Html::parse_document(&html.text()?);
-            Ok(scr.parse_article(html)?)
-        }
-        Err(err) => Err(Box::new(BackendError::ServerError(err.to_string()))),
-    }
-}
-
-trait Scraper {
-    fn get_domain(&self) -> &str;
+// TODO: Consider adding the Parser trait
+pub trait NewsSite {
     fn get_feed_url(&self, page: usize) -> String;
     fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError>;
     fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, BackendError>;
-}
-
-impl Feed {
-    fn get_feed_site(url: &str, scr: Box<dyn Scraper>) -> Result<Vec<FeedItem>, Box<dyn Error>> {
+    fn get_feed_items(&self, page: usize) -> Result<Vec<FeedItem>, Box<dyn Error>> {
+        let url = self.get_feed_url(page);
         let html = reqwest::blocking::get(url)?;
         let html = html.error_for_status()?;
         let html = Html::parse_document(&html.text()?);
-        Ok(scr.parse_feed(html)?)
+        Ok(self.parse_feed(html)?)
+    }
+}
+
+impl FeedItem {
+    pub fn get_article(&self) -> Result<Vec<Components>, Box<dyn Error>> {
+        let html = reqwest::blocking::get(self.url.as_ref().unwrap())?;
+        match html.error_for_status() {
+            Ok(html) => {
+                let html = Html::parse_document(&html.text()?);
+                Ok(self.scraper.parse_article(html)?)
+            }
+            Err(err) => Err(Box::new(BackendError::ServerError(err.to_string()))),
+        }
+    }
+}
+
+impl Feed {
+    pub fn selected(&self) -> &FeedItem {
+        &self.items[self.selected]
     }
 
-    // TODO: Add scraping from multiple pages of the same source
+    // TODO: async
     fn get_new_items(page: usize) -> Vec<FeedItem> {
-        let scrapers = vec![Box::new(N1)];
+        let news_sites: &[Box<dyn NewsSite>] = &[Box::new(N1), Box::new(Danas)];
         let mut feed_items = Vec::new();
-        for scr in scrapers {
-            let url = scr.get_feed_url(page);
-            match Self::get_feed_site(&url, scr) {
+        for scr in news_sites {
+            match scr.get_feed_items(page) {
                 Ok(new_feed_items) => feed_items.extend(new_feed_items),
                 Err(err) => eprintln!("Couldn't get articles from: {err}"),
             }
         }
-        // TODO: sort
+        feed_items.sort_by(|a, b| b.published.unwrap().cmp(&a.published.unwrap()));
         feed_items
     }
 
@@ -90,10 +89,6 @@ impl Feed {
             selected: 0,
             page: 0,
         })
-    }
-
-    pub fn get_selected_url(&self) -> &str {
-        self.items[self.selected].url.as_ref().unwrap()
     }
 
     pub fn refresh(&mut self, is_manual: bool) -> Option<usize> {
@@ -120,6 +115,8 @@ impl Feed {
         Some(num_new)
     }
 
+    // FIXME: Figure out a better way always have articles in order (perhaps hardcode say 20
+    //        articles per append and then cache the unused articles)
     pub fn next_page(&mut self) -> Result<Vec<FeedItem>, BackendError> {
         self.page += 1;
         let new_feed_items = Self::get_new_items(self.page);
