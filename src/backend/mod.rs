@@ -1,10 +1,12 @@
 mod danas;
 mod n1;
+mod parsers;
 
 use crate::{Feed, FeedItem, frontend::Components};
 use chrono::Utc;
 use danas::Danas;
 use n1::N1;
+use parsers::Parser;
 use scraper::Html;
 use std::{error::Error, fmt::Display};
 
@@ -32,11 +34,8 @@ impl Display for BackendError {
     }
 }
 
-// TODO: Consider adding the Parser trait
-pub trait NewsSite {
+pub trait NewsSite: Parser + Display {
     fn get_feed_url(&self, page: usize) -> String;
-    fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError>;
-    fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, BackendError>;
     fn get_feed_items(&self, page: usize) -> Result<Vec<FeedItem>, Box<dyn Error>> {
         let url = self.get_feed_url(page);
         let html = reqwest::blocking::get(url)?;
@@ -48,11 +47,11 @@ pub trait NewsSite {
 
 impl FeedItem {
     pub fn get_article(&self) -> Result<Vec<Components>, Box<dyn Error>> {
-        let html = reqwest::blocking::get(self.url.as_ref().unwrap())?;
+        let html = reqwest::blocking::get(&self.url)?;
         match html.error_for_status() {
             Ok(html) => {
                 let html = Html::parse_document(&html.text()?);
-                Ok(self.scraper.parse_article(html)?)
+                Ok(self.parser.parse_article(html)?)
             }
             Err(err) => Err(Box::new(BackendError::ServerError(err.to_string()))),
         }
@@ -74,7 +73,7 @@ impl Feed {
                 Err(err) => eprintln!("Couldn't get articles from: {err}"),
             }
         }
-        feed_items.sort_by(|a, b| b.published.unwrap().cmp(&a.published.unwrap()));
+        feed_items.sort_by(|a, b| b.published.cmp(&a.published));
         feed_items
     }
 
@@ -97,19 +96,17 @@ impl Feed {
             return None;
         }
 
+        // FIXME: Scrape not just the first page but all up until the self.items[0]
         let all_articles = Self::get_new_items(0);
         let first = self.items.get(0)?;
         let new_articles: Vec<FeedItem> = all_articles
             .into_iter()
-            .take_while(|i| {
-                i.published
-                    .map_or(false, |ip| first.published.map_or(false, |fp| ip > fp))
-            })
+            .take_while(|i| i.published > first.published)
             .collect();
         let num_new = new_articles.len();
 
         self.time = now;
-        for new_article in new_articles.into_iter().rev() {
+        for new_article in new_articles {
             self.items.push_front(new_article);
         }
         Some(num_new)

@@ -22,12 +22,13 @@ use std::{
     time::Duration,
 };
 
+// TODO: Add read: bool field
 pub struct FeedItem {
-    url: Option<String>,
+    url: String,
     title: String,
-    published: Option<NaiveDateTime>,
+    published: NaiveDateTime,
     at: Option<usize>,
-    scraper: Box<dyn NewsSite>,
+    parser: Rc<dyn NewsSite>,
 }
 
 pub struct Feed {

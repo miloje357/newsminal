@@ -17,7 +17,7 @@ cargo build -r
 Then move the resulting binary (found in target/release/) into a directory in your $PATH
 
 ## TODOs
- - Add more scrapers (Insajder, Nova, Danas, Politika, ...)
+ - Add more scrapers (Insajder, Nova, Politika, ...)
  - Add article caching
  - Add filtering by topic
  - Add configuration (colors, positioning, ...)

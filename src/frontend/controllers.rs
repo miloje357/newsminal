@@ -181,6 +181,7 @@ impl FeedControler<'_> {
         Ok(self.feed.selected == last_selected)
     }
 
+    // FIXME: Selected goes out of bounds when there are a lot of new articles
     pub fn refresh(
         &mut self,
         mut qc: impl QueueableCommand + Write,

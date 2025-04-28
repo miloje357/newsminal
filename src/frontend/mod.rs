@@ -262,9 +262,7 @@ impl Component for Boxed {
 impl FeedItem {
     pub fn build(&self) -> Components {
         let mut rows = vec![self.title.clone()];
-        if let Some(dt) = self.published {
-            rows.push(dt.to_string());
-        }
+        rows.push(self.published.to_string());
         Components::Boxed(rows)
     }
 }
