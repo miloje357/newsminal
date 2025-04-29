@@ -12,7 +12,6 @@ use std::{error::Error, fmt::Display};
 
 #[derive(Debug)]
 pub enum BackendError {
-    NoScraper,
     NoTitle,
     NoContent,
     ServerError(String),
@@ -29,20 +28,12 @@ impl Display for BackendError {
             BackendError::FeedError => {
                 write!(f, "Couldn't get any articles from feed (check logs)")
             }
-            BackendError::NoScraper => write!(f, "No support for this site"),
         }
     }
 }
 
 pub trait NewsSite: Parser + Display {
-    fn get_feed_url(&self, page: usize) -> String;
-    fn get_feed_items(&self, page: usize) -> Result<Vec<FeedItem>, Box<dyn Error>> {
-        let url = self.get_feed_url(page);
-        let html = reqwest::blocking::get(url)?;
-        let html = html.error_for_status()?;
-        let html = Html::parse_document(&html.text()?);
-        Ok(self.parse_feed(html)?)
-    }
+    fn get_feed_items(&self) -> Result<Vec<FeedItem>, Box<dyn Error>>;
 }
 
 impl FeedItem {
@@ -64,13 +55,13 @@ impl Feed {
     }
 
     // TODO: async
-    fn get_new_items(page: usize) -> Vec<FeedItem> {
+    fn get_new_items() -> Vec<FeedItem> {
         let news_sites: &[Box<dyn NewsSite>] = &[Box::new(N1), Box::new(Danas)];
         let mut feed_items = Vec::new();
         for scr in news_sites {
-            match scr.get_feed_items(page) {
+            match scr.get_feed_items() {
                 Ok(new_feed_items) => feed_items.extend(new_feed_items),
-                Err(err) => eprintln!("Couldn't get articles from: {err}"),
+                Err(err) => eprintln!("Couldn't get articles from {}: {err}", scr),
             }
         }
         feed_items.sort_by(|a, b| b.published.cmp(&a.published));
@@ -78,7 +69,7 @@ impl Feed {
     }
 
     pub fn new() -> Result<Self, Box<dyn Error>> {
-        let feed_items = Self::get_new_items(0);
+        let feed_items = Self::get_new_items();
         if feed_items.is_empty() {
             return Err(Box::new(BackendError::FeedError));
         }
@@ -86,7 +77,6 @@ impl Feed {
             time: Utc::now().naive_utc(),
             items: feed_items.into(),
             selected: 0,
-            page: 0,
         })
     }
 
@@ -96,8 +86,7 @@ impl Feed {
             return None;
         }
 
-        // FIXME: Scrape not just the first page but all up until the self.items[0]
-        let all_articles = Self::get_new_items(0);
+        let all_articles = Self::get_new_items();
         let first = self.items.get(0)?;
         let new_articles: Vec<FeedItem> = all_articles
             .into_iter()
@@ -110,17 +99,6 @@ impl Feed {
             self.items.push_front(new_article);
         }
         Some(num_new)
-    }
-
-    // FIXME: Figure out a better way always have articles in order (perhaps hardcode say 20
-    //        articles per append and then cache the unused articles)
-    pub fn next_page(&mut self) -> Result<Vec<FeedItem>, BackendError> {
-        self.page += 1;
-        let new_feed_items = Self::get_new_items(self.page);
-        if new_feed_items.is_empty() {
-            return Err(BackendError::FeedError);
-        }
-        Ok(new_feed_items)
     }
 }
 

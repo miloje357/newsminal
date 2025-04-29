@@ -95,7 +95,7 @@ impl FeedControler<'_> {
         &mut self,
         mut qc: impl QueueableCommand + Write,
         dir: Direction,
-    ) -> io::Result<bool> {
+    ) -> io::Result<()> {
         let term_height = self.textpad.geo.borrow().term_height;
         self.redraw_selected(&mut qc, false)?;
         match dir {
@@ -123,13 +123,11 @@ impl FeedControler<'_> {
                     if next_row - self.textpad.first >= term_height {
                         self.scroll(&mut qc, dir)?;
                     }
-                } else {
-                    return Ok(true);
                 }
             }
         };
         self.redraw_selected(&mut qc, true)?;
-        Ok(false)
+        Ok(())
     }
 
     pub fn set_positions(&mut self) {
@@ -192,7 +190,13 @@ impl FeedControler<'_> {
             return Ok(());
         }
         if let Some(num_new) = num_new {
-            let new_comps = self.feed.items.iter().take(num_new).map(|i| i.build());
+            let new_comps = self
+                .feed
+                .items
+                .iter()
+                .take(num_new)
+                .map(|i| i.build())
+                .rev();
             for comp in new_comps {
                 self.textpad.components.push_front(comp);
             }
@@ -224,25 +228,6 @@ impl FeedControler<'_> {
         self.refresh(&mut qc, false)?;
         self.textpad.geo.borrow_mut().change_view(View::Feed);
         self.draw(&mut qc)?;
-        Ok(())
-    }
-
-    pub fn append(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
-        let new_feed_items = self.feed.next_page();
-        match new_feed_items {
-            Ok(new_feed_items) => {
-                let new_comps = new_feed_items.iter().map(|i| i.build());
-                self.textpad.components.extend(new_comps);
-                self.feed.items.extend(new_feed_items);
-                self.textpad.build();
-                self.set_positions();
-                self.scroll(&mut qc, Direction::Down)?;
-            }
-            Err(err) => {
-                ErrorWindow::build(&format!("Couldn't get next page: {err}"), self.textpad.geo)?
-                    .run(qc)?
-            }
-        }
         Ok(())
     }
 }

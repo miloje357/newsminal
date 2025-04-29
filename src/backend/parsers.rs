@@ -1,6 +1,7 @@
-use std::rc::Rc;
+use std::{error::Error, rc::Rc};
 
-use chrono::NaiveDateTime;
+use chrono::DateTime;
+use rss::Channel;
 use scraper::{ElementRef, Html, Selector};
 
 use crate::{FeedItem, frontend::Components};
@@ -8,28 +9,6 @@ use crate::{FeedItem, frontend::Components};
 use super::{BackendError, NewsSite};
 
 pub trait Parser {
-    fn parse_feed_title(&self, article: ElementRef, selector: &Selector) -> Option<String> {
-        Some(
-            article
-                .select(&selector)
-                .next()?
-                .text()
-                .collect::<String>()
-                .trim()
-                .to_string(),
-        )
-    }
-
-    fn parse_feed_url(&self, article: ElementRef, selector: &Selector) -> Option<String> {
-        Some(article.select(&selector).next()?.attr("href")?.to_string())
-    }
-
-    fn parse_feed_published(
-        &self,
-        article: ElementRef,
-        selector: &Selector,
-    ) -> Option<NaiveDateTime>;
-
     fn parse_article_title(
         &self,
         html: &Html,
@@ -43,41 +22,32 @@ pub trait Parser {
             .collect::<String>())
     }
 
-    fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, BackendError>;
     fn parse_article_content(&self, elem: ElementRef) -> Option<Components>;
     fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError>;
 }
 
-pub struct FeedSelectors<'a> {
-    pub article: &'a str,
-    pub url: &'a str,
-    pub title: &'a str,
-    pub time: &'a str,
-}
-
-// TODO: Add rss feed parsing as well
-pub fn parse_feed(
+pub fn get_feed_items(
     parser: Rc<dyn NewsSite>,
-    html: Html,
-    selectors: FeedSelectors,
-) -> Result<Vec<FeedItem>, BackendError> {
-    let article_selector = Selector::parse(&selectors.article).unwrap();
-    let link_selector = Selector::parse(&selectors.url).unwrap();
-    let title_selector = Selector::parse(&selectors.title).unwrap();
-    let time_selector = Selector::parse(&selectors.time).unwrap();
-    Ok(html
-        .select(&article_selector)
-        .filter_map(|a| {
-            // TODO: Write to stderr if any of the parser funcitons errored
+    url: &'static str,
+) -> Result<Vec<FeedItem>, Box<dyn Error>> {
+    let rss = reqwest::blocking::get(url)?;
+    let rss = rss.error_for_status()?.bytes()?;
+    let rss = Channel::read_from(&rss[..])?;
+    Ok(rss
+        .items
+        .iter()
+        .filter_map(|item| {
             Some(FeedItem {
-                url: parser.parse_feed_url(a, &link_selector)?,
-                title: format!(
-                    "({parser}) {}",
-                    parser.parse_feed_title(a, &title_selector)?
-                ),
-                published: parser.parse_feed_published(a, &time_selector)?,
+                url: item
+                    .link
+                    .clone()
+                    .and_then(|url| (!url.contains("english")).then_some(url))?,
+                title: format!("({}) {}", parser, item.title.clone()?),
+                published: DateTime::parse_from_rfc2822(&item.pub_date.clone()?)
+                    .ok()?
+                    .into(),
                 at: None,
-                parser: Rc::clone(&parser),
+                parser: parser.clone(),
             })
         })
         .collect())

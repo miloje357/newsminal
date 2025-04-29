@@ -3,7 +3,7 @@ mod frontend;
 mod input;
 
 use backend::NewsSite;
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Local, NaiveDateTime};
 use crossterm::{
     QueueableCommand, cursor,
     event::{self, Event},
@@ -26,7 +26,7 @@ use std::{
 pub struct FeedItem {
     url: String,
     title: String,
-    published: NaiveDateTime,
+    published: DateTime<Local>,
     at: Option<usize>,
     parser: Rc<dyn NewsSite>,
 }
@@ -35,7 +35,6 @@ pub struct Feed {
     time: NaiveDateTime,
     items: VecDeque<FeedItem>,
     selected: usize,
-    page: usize,
 }
 
 trait Runnable {
@@ -182,11 +181,7 @@ impl Runnable for FeedControler<'_> {
         match self.input.map(event, View::Feed) {
             Some(Controls::Quit) => return Ok(false),
             Some(Controls::MoveSelect(dir)) => {
-                let should_append = self.move_select(&mut qc, dir)?;
-                if should_append {
-                    self.append(&mut qc)?;
-                    self.move_select(&mut qc, dir)?;
-                }
+                self.move_select(&mut qc, dir)?;
                 qc.flush()?;
             }
             Some(Controls::Resize(new_dimens)) => {

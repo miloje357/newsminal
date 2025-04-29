@@ -1,11 +1,10 @@
-use std::{fmt::Display, rc::Rc};
+use std::{error::Error, fmt::Display, rc::Rc};
 
-use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
-use scraper::{Html, Selector};
+use scraper::Html;
 
 use crate::{FeedItem, frontend::Components};
 
-use super::{BackendError, NewsSite, Parser, parsers::FeedSelectors};
+use super::{BackendError, NewsSite, Parser};
 
 pub struct Danas;
 
@@ -16,43 +15,12 @@ impl Display for Danas {
 }
 
 impl NewsSite for Danas {
-    fn get_feed_url(&self, page: usize) -> String {
-        format!("https://www.danas.rs/najnovije-vesti/page/{}", page + 1)
+    fn get_feed_items(&self) -> Result<Vec<FeedItem>, Box<dyn Error>> {
+        super::parsers::get_feed_items(Rc::new(Self), "https://danas.rs/feed")
     }
 }
 
 impl Parser for Danas {
-    fn parse_feed_published(
-        &self,
-        article: scraper::ElementRef,
-        selector: &Selector,
-    ) -> Option<NaiveDateTime> {
-        const TIME_FORMAT: &str = "%d.%m.%Y. %H:%M";
-        const TODAY: &str = "danas %H:%M";
-        let published = article.select(&selector).next()?.text().collect::<String>();
-        match NaiveDateTime::parse_from_str(&published, TIME_FORMAT) {
-            Ok(dt) => Some(dt),
-            Err(_) => {
-                let time = NaiveTime::parse_from_str(&published, TODAY).ok()?;
-                let today: NaiveDate = Local::now().date_naive();
-                Some(NaiveDateTime::new(today, time))
-            }
-        }
-    }
-
-    fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, BackendError> {
-        super::parsers::parse_feed(
-            Rc::new(Self),
-            html,
-            FeedSelectors {
-                article: "article",
-                url: "h3 a",
-                title: "h3",
-                time: ".published",
-            },
-        )
-    }
-
     fn parse_article_content(&self, elem: scraper::ElementRef) -> Option<Components> {
         match elem.value().name() {
             "p" => {

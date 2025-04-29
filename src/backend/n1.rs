@@ -1,8 +1,7 @@
-use std::{fmt::Display, rc::Rc};
+use std::{error::Error, fmt::Display, rc::Rc};
 
-use super::{BackendError, FeedItem, NewsSite, Parser, parsers::FeedSelectors};
+use super::{BackendError, FeedItem, NewsSite, Parser};
 use crate::frontend::Components;
-use chrono::NaiveDateTime;
 use scraper::{ElementRef, Html, Selector};
 
 pub struct N1;
@@ -14,40 +13,12 @@ impl Display for N1 {
 }
 
 impl NewsSite for N1 {
-    fn get_feed_url(&self, page: usize) -> String {
-        format!("https://n1info.rs/najnovije/page/{}", page + 1)
+    fn get_feed_items(&self) -> Result<Vec<FeedItem>, Box<dyn Error>> {
+        super::parsers::get_feed_items(Rc::new(Self), "https://n1info.rs/feed")
     }
 }
 
 impl Parser for N1 {
-    fn parse_feed_published(
-        &self,
-        article: ElementRef,
-        selector: &Selector,
-    ) -> Option<NaiveDateTime> {
-        const TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S";
-        Some(
-            article
-                .select(&selector)
-                .next()
-                .and_then(|el| el.attr("datetime"))
-                .and_then(|dt| NaiveDateTime::parse_from_str(dt, TIME_FORMAT).ok())?,
-        )
-    }
-
-    fn parse_feed(&self, html: Html) -> Result<Vec<FeedItem>, BackendError> {
-        super::parsers::parse_feed(
-            Rc::new(Self),
-            html,
-            FeedSelectors {
-                article: "article",
-                url: "a",
-                title: "h3",
-                time: "time",
-            },
-        )
-    }
-
     fn parse_article_content(&self, elem: ElementRef) -> Option<Components> {
         match elem.value().name() {
             "p" => {
