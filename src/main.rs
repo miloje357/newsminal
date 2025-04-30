@@ -3,7 +3,7 @@ mod frontend;
 mod input;
 
 use backend::NewsSite;
-use chrono::{DateTime, Local, NaiveDateTime};
+use chrono::{DateTime, Local};
 use crossterm::{
     QueueableCommand, cursor,
     event::{self, Event},
@@ -19,7 +19,7 @@ use std::{
     panic, process,
     rc::Rc,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 // TODO: Add read: bool field
@@ -32,12 +32,20 @@ pub struct FeedItem {
 }
 
 pub struct Feed {
-    time: NaiveDateTime,
+    time: Instant,
     items: VecDeque<FeedItem>,
     selected: usize,
 }
 
 trait Runnable {
+    fn run_every_minute(&mut self, _qc: impl QueueableCommand + Write) -> io::Result<()> {
+        Ok(())
+    }
+
+    fn get_timer(&self) -> Option<Instant> {
+        None
+    }
+
     fn handle_input(&mut self, event: Event, qc: impl QueueableCommand + Write)
     -> io::Result<bool>;
     fn run(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
@@ -45,6 +53,11 @@ trait Runnable {
         while should_run {
             if event::poll(Duration::ZERO)? {
                 should_run = self.handle_input(event::read()?, &mut qc)?;
+            }
+            if let Some(timer) = self.get_timer() {
+                if (Instant::now() - timer).as_secs() >= 60 {
+                    self.run_every_minute(&mut qc)?;
+                }
             }
             thread::sleep(Duration::from_millis(16));
         }
@@ -173,6 +186,17 @@ impl<'a> FeedControler<'a> {
 }
 
 impl Runnable for FeedControler<'_> {
+    fn run_every_minute(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
+        self.refresh(&mut qc)?;
+        self.draw(&mut qc)?;
+        qc.flush()?;
+        Ok(())
+    }
+
+    fn get_timer(&self) -> Option<Instant> {
+        Some(self.feed.time)
+    }
+
     fn handle_input(
         &mut self,
         event: Event,
@@ -208,7 +232,7 @@ impl Runnable for FeedControler<'_> {
                 qc.flush()?;
             }
             Some(Controls::Refresh) => {
-                self.refresh(&mut qc, true)?;
+                self.refresh(&mut qc)?;
                 self.draw(&mut qc)?;
                 qc.flush()?;
             }
@@ -216,6 +240,26 @@ impl Runnable for FeedControler<'_> {
             None => {}
         }
         Ok(true)
+    }
+
+    fn run(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
+        let mut should_run = true;
+        let mut timer = Instant::now();
+        while should_run {
+            if event::poll(Duration::ZERO)? {
+                should_run = self.handle_input(event::read()?, &mut qc)?;
+            }
+            // TODO: Consider adding a way to not run this
+            if let Some(new_timer) = self.get_timer() {
+                timer = new_timer;
+            }
+            if (Instant::now() - timer).as_secs() >= 60 {
+                self.run_every_minute(&mut qc)?;
+                timer = Instant::now();
+            }
+            thread::sleep(Duration::from_millis(16));
+        }
+        Ok(())
     }
 }
 

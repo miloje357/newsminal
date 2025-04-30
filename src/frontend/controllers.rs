@@ -1,8 +1,12 @@
-use std::io::{self, Write};
+use std::{
+    io::{self, Write},
+    time::Duration,
+};
 
 use crossterm::{
-    QueueableCommand, cursor,
+    QueueableCommand, cursor, event,
     style::{self, Stylize},
+    terminal,
 };
 
 use crate::{
@@ -179,13 +183,32 @@ impl FeedControler<'_> {
         Ok(self.feed.selected == last_selected)
     }
 
-    // FIXME: Selected goes out of bounds when there are a lot of new articles
-    pub fn refresh(
-        &mut self,
+    fn draw_refreshing(
+        &self,
         mut qc: impl QueueableCommand + Write,
-        is_manual: bool,
+        heigth: u16,
     ) -> io::Result<()> {
-        let num_new = self.feed.refresh(is_manual);
+        const TEXT: &str = "REFRESHING...";
+        let geo = self.textpad.geo.borrow();
+        let x = geo.startx + (geo.width - TEXT.len() as u16) / 2;
+        qc.queue(cursor::MoveTo(x, heigth / 2 + 1))?
+            .queue(style::Print(TEXT))?;
+        Ok(())
+    }
+
+    // FIXME: Selected goes out of bounds when there are a lot of new articles
+    pub fn refresh(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
+        const HEIGHT: u16 = 5;
+        qc.queue(terminal::ScrollDown(HEIGHT))?;
+        self.draw_refreshing(&mut qc, HEIGHT)?;
+        qc.flush()?;
+        let num_new = self.feed.refresh();
+        qc.queue(terminal::ScrollUp(HEIGHT))?;
+        // Clear stdin
+        while event::poll(Duration::ZERO)? {
+            let _ = event::read();
+        }
+
         if num_new == Some(0) {
             return Ok(());
         }
@@ -225,7 +248,6 @@ impl FeedControler<'_> {
             )?
             .run(&mut qc)?,
         }
-        self.refresh(&mut qc, false)?;
         self.textpad.geo.borrow_mut().change_view(View::Feed);
         self.draw(&mut qc)?;
         Ok(())

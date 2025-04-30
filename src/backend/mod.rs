@@ -8,7 +8,7 @@ use danas::Danas;
 use n1::N1;
 use parsers::Parser;
 use scraper::Html;
-use std::{error::Error, fmt::Display};
+use std::{error::Error, fmt::Display, time::Instant};
 
 #[derive(Debug)]
 pub enum BackendError {
@@ -74,18 +74,13 @@ impl Feed {
             return Err(Box::new(BackendError::FeedError));
         }
         Ok(Feed {
-            time: Utc::now().naive_utc(),
+            time: Instant::now(),
             items: feed_items.into(),
             selected: 0,
         })
     }
 
-    pub fn refresh(&mut self, is_manual: bool) -> Option<usize> {
-        let now = Utc::now().naive_utc();
-        if !is_manual && (now - self.time).num_minutes() < 1 {
-            return None;
-        }
-
+    pub fn refresh(&mut self) -> Option<usize> {
         let all_articles = Self::get_new_items();
         let first = self.items.get(0)?;
         let new_articles: Vec<FeedItem> = all_articles
@@ -93,13 +88,10 @@ impl Feed {
             .take_while(|i| i.published > first.published)
             .collect();
         let num_new = new_articles.len();
-
-        self.time = now;
-        for new_article in new_articles {
+        self.time = Instant::now();
+        for new_article in new_articles.into_iter().rev() {
             self.items.push_front(new_article);
         }
         Some(num_new)
     }
 }
-
-// TODO: Add more scrapers
