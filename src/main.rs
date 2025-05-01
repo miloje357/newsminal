@@ -12,6 +12,7 @@ use crossterm::{
 };
 use frontend::{Components, Geometry, TextPad};
 use input::*;
+use reqwest::blocking::Client;
 use std::{
     cell::RefCell,
     collections::VecDeque,
@@ -22,12 +23,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+enum Body {
+    Fetched { html: String, lead: String },
+    ToFetch { url: String },
+}
+
 // TODO: Add read: bool field
 pub struct FeedItem {
-    url: String,
     title: String,
     published: DateTime<Local>,
     at: Option<usize>,
+    body: Body,
     parser: Rc<dyn NewsSite>,
 }
 
@@ -35,6 +41,7 @@ pub struct Feed {
     time: Instant,
     items: VecDeque<FeedItem>,
     selected: usize,
+    client: Client,
 }
 
 trait Runnable {

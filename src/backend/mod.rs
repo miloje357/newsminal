@@ -1,20 +1,20 @@
 mod danas;
+mod insajder;
 mod n1;
 mod parsers;
 
-use crate::{Feed, FeedItem, frontend::Components};
-use chrono::Utc;
+use crate::{Body, Feed, FeedItem, frontend::Components};
 use danas::Danas;
+use insajder::Insajder;
 use n1::N1;
 use parsers::Parser;
+use reqwest::blocking::Client;
 use scraper::Html;
 use std::{error::Error, fmt::Display, time::Instant};
 
 #[derive(Debug)]
 pub enum BackendError {
-    NoTitle,
     NoContent,
-    ServerError(String),
     FeedError,
 }
 
@@ -22,9 +22,7 @@ impl Error for BackendError {}
 impl Display for BackendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BackendError::NoTitle => write!(f, "Couldn't scrape title from article HTML"),
-            BackendError::NoContent => write!(f, "Couldn't scrape paragraphs from article HTML"),
-            BackendError::ServerError(err) => write!(f, "Server returned an error: {err}"),
+            BackendError::NoContent => write!(f, "Couldn't scrape content from article HTML"),
             BackendError::FeedError => {
                 write!(f, "Couldn't get any articles from feed (check logs)")
             }
@@ -32,19 +30,30 @@ impl Display for BackendError {
     }
 }
 
-pub trait NewsSite: Parser + Display {
-    fn get_feed_items(&self) -> Result<Vec<FeedItem>, Box<dyn Error>>;
+pub trait NewsSite: Display + Parser {
+    fn get_feed_items(&self, clinet: &Client) -> Result<Vec<FeedItem>, Box<dyn Error>>;
 }
 
 impl FeedItem {
     pub fn get_article(&self) -> Result<Vec<Components>, Box<dyn Error>> {
-        let html = reqwest::blocking::get(&self.url)?;
-        match html.error_for_status() {
-            Ok(html) => {
-                let html = Html::parse_document(&html.text()?);
-                Ok(self.parser.parse_article(html)?)
+        match &self.body {
+            Body::Fetched { html, lead } => {
+                let mut body = vec![
+                    Components::Title(self.title.clone()),
+                    Components::Lead(lead.to_string()),
+                ];
+                let html = Html::parse_fragment(&html);
+                body.append(&mut self.parser.parse_article(html)?);
+                Ok(body)
             }
-            Err(err) => Err(Box::new(BackendError::ServerError(err.to_string()))),
+            Body::ToFetch { url } => {
+                let mut body = vec![Components::Title(self.title.clone())];
+                let html = reqwest::blocking::get(url)?;
+                let html = html.error_for_status()?.text()?;
+                let html = Html::parse_document(&html);
+                body.append(&mut self.parser.parse_article(html)?);
+                Ok(body)
+            }
         }
     }
 }
@@ -54,22 +63,23 @@ impl Feed {
         &self.items[self.selected]
     }
 
-    // TODO: async
-    fn get_new_items() -> Vec<FeedItem> {
-        let news_sites: &[Box<dyn NewsSite>] = &[Box::new(N1), Box::new(Danas)];
+    fn get_new_items(client: &Client) -> Vec<FeedItem> {
+        let news_sites: &[Box<dyn NewsSite>] = &[Box::new(N1), Box::new(Danas), Box::new(Insajder)];
         let mut feed_items = Vec::new();
         for scr in news_sites {
-            match scr.get_feed_items() {
+            match scr.get_feed_items(client) {
                 Ok(new_feed_items) => feed_items.extend(new_feed_items),
                 Err(err) => eprintln!("Couldn't get articles from {}: {err}", scr),
             }
         }
+        // FIXME: Cut off items that are too old to preserve uniform density
         feed_items.sort_by(|a, b| b.published.cmp(&a.published));
         feed_items
     }
 
     pub fn new() -> Result<Self, Box<dyn Error>> {
-        let feed_items = Self::get_new_items();
+        let client = Client::new();
+        let feed_items = Self::get_new_items(&client);
         if feed_items.is_empty() {
             return Err(Box::new(BackendError::FeedError));
         }
@@ -77,11 +87,12 @@ impl Feed {
             time: Instant::now(),
             items: feed_items.into(),
             selected: 0,
+            client,
         })
     }
 
     pub fn refresh(&mut self) -> Option<usize> {
-        let all_articles = Self::get_new_items();
+        let all_articles = Self::get_new_items(&self.client);
         let first = self.items.get(0)?;
         let new_articles: Vec<FeedItem> = all_articles
             .into_iter()

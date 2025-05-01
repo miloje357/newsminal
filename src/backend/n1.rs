@@ -2,6 +2,7 @@ use std::{error::Error, fmt::Display, rc::Rc};
 
 use super::{BackendError, FeedItem, NewsSite, Parser};
 use crate::frontend::Components;
+use reqwest::blocking::Client;
 use scraper::{ElementRef, Html, Selector};
 
 pub struct N1;
@@ -13,8 +14,8 @@ impl Display for N1 {
 }
 
 impl NewsSite for N1 {
-    fn get_feed_items(&self) -> Result<Vec<FeedItem>, Box<dyn Error>> {
-        super::parsers::get_feed_items(Rc::new(Self), "https://n1info.rs/feed")
+    fn get_feed_items(&self, client: &Client) -> Result<Vec<FeedItem>, Box<dyn Error>> {
+        super::parsers::get_feed_items(client, Rc::new(Self), "https://n1info.rs/feed")
     }
 }
 
@@ -59,6 +60,6 @@ impl Parser for N1 {
     }
 
     fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError> {
-        super::parsers::parse_article(Rc::new(Self), html, ".entry-title", ".entry-content")
+        super::parsers::parse_article(Rc::new(Self), html, ".entry-content")
     }
 }

@@ -974,6 +974,8 @@ dependencies = [
  "reqwest",
  "rss",
  "scraper",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

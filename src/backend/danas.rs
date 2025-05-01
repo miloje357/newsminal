@@ -1,5 +1,6 @@
 use std::{error::Error, fmt::Display, rc::Rc};
 
+use reqwest::blocking::Client;
 use scraper::Html;
 
 use crate::{FeedItem, frontend::Components};
@@ -15,14 +16,15 @@ impl Display for Danas {
 }
 
 impl NewsSite for Danas {
-    fn get_feed_items(&self) -> Result<Vec<FeedItem>, Box<dyn Error>> {
-        super::parsers::get_feed_items(Rc::new(Self), "https://danas.rs/feed")
+    fn get_feed_items(&self, client: &Client) -> Result<Vec<FeedItem>, Box<dyn Error>> {
+        super::parsers::get_feed_items(client, Rc::new(Self), "https://danas.rs/feed")
     }
 }
 
 impl Parser for Danas {
     fn parse_article_content(&self, elem: scraper::ElementRef) -> Option<Components> {
         match elem.value().name() {
+            // FIXME: Text with some json appears
             "p" => {
                 let text: String = elem.text().collect();
                 Some(Components::Paragraph(text))
@@ -53,11 +55,6 @@ impl Parser for Danas {
     // FIXME: BBC articles don't work
     //        (CONTENT_SELECTOR should be ".content div.flex .w-full div")
     fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError> {
-        super::parsers::parse_article(
-            Rc::new(Self),
-            html,
-            ".post-title",
-            ".content div.flex .w-full",
-        )
+        super::parsers::parse_article(Rc::new(Self), html, ".content div.flex .w-full")
     }
 }
