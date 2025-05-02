@@ -4,13 +4,14 @@ mod n1;
 mod parsers;
 
 use crate::{Body, Feed, FeedItem, frontend::Components};
+use chrono::{DateTime, Local};
 use danas::Danas;
 use insajder::Insajder;
 use n1::N1;
 use parsers::Parser;
 use reqwest::blocking::Client;
 use scraper::Html;
-use std::{error::Error, fmt::Display, time::Instant};
+use std::{cmp, error::Error, fmt::Display, time::Instant};
 
 #[derive(Debug)]
 pub enum BackendError {
@@ -43,7 +44,7 @@ impl FeedItem {
                     Components::Lead(lead.to_string()),
                 ];
                 let html = Html::parse_fragment(&html);
-                body.append(&mut self.parser.parse_article(html)?);
+                body.extend(self.parser.parse_article(html)?);
                 Ok(body)
             }
             Body::ToFetch { url } => {
@@ -51,7 +52,7 @@ impl FeedItem {
                 let html = reqwest::blocking::get(url)?;
                 let html = html.error_for_status()?.text()?;
                 let html = Html::parse_document(&html);
-                body.append(&mut self.parser.parse_article(html)?);
+                body.extend(self.parser.parse_article(html)?);
                 Ok(body)
             }
         }
@@ -66,13 +67,22 @@ impl Feed {
     fn get_new_items(client: &Client) -> Vec<FeedItem> {
         let news_sites: &[Box<dyn NewsSite>] = &[Box::new(N1), Box::new(Danas), Box::new(Insajder)];
         let mut feed_items = Vec::new();
+        let mut last_published = DateTime::<Local>::MIN_UTC.into();
         for scr in news_sites {
             match scr.get_feed_items(client) {
-                Ok(new_feed_items) => feed_items.extend(new_feed_items),
+                Ok(new_feed_items) => {
+                    if let Some(last) = new_feed_items.last() {
+                        last_published = cmp::max(last_published, last.published);
+                    }
+                    feed_items.extend(new_feed_items)
+                }
                 Err(err) => eprintln!("Couldn't get articles from {}: {err}", scr),
             }
         }
-        // FIXME: Cut off items that are too old to preserve uniform density
+        let mut feed_items = feed_items
+            .into_iter()
+            .filter(|item| item.published > last_published)
+            .collect::<Vec<_>>();
         feed_items.sort_by(|a, b| b.published.cmp(&a.published));
         feed_items
     }

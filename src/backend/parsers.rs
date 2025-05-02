@@ -64,5 +64,3 @@ pub fn parse_article(
 
     Ok(article)
 }
-
-// TODO: Add more scrapers

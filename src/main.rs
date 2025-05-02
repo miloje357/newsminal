@@ -8,7 +8,7 @@ use crossterm::{
     QueueableCommand, cursor,
     event::{self, Event},
     execute,
-    terminal::{self, ClearType, disable_raw_mode},
+    terminal::{self, ClearType},
 };
 use frontend::{Components, Geometry, TextPad};
 use input::*;
@@ -28,7 +28,8 @@ enum Body {
     ToFetch { url: String },
 }
 
-// TODO: Add read: bool field
+// TODO: Add is_read: bool field
+// TODO: Add is_new: bool field
 pub struct FeedItem {
     title: String,
     published: DateTime<Local>,
@@ -256,7 +257,6 @@ impl Runnable for FeedControler<'_> {
             if event::poll(Duration::ZERO)? {
                 should_run = self.handle_input(event::read()?, &mut qc)?;
             }
-            // TODO: Consider adding a way to not run this
             if let Some(new_timer) = self.get_timer() {
                 timer = new_timer;
             }
@@ -306,7 +306,7 @@ fn main() {
     });
 
     panic::set_hook(Box::new(|info| {
-        let _ = disable_raw_mode();
+        let _ = terminal::disable_raw_mode();
         let _ = execute!(stdout(), terminal::LeaveAlternateScreen);
         let _ = stdout().flush();
         eprintln!("Panic occurred: {}", info);

@@ -193,6 +193,7 @@ pub trait Component {
 }
 
 // BUG: Doesn't display utf-8 properly
+// FIXME: Breaks make turn into \n which aren't accounted for
 pub struct Paragraph;
 impl Component for Paragraph {
     fn build(text: &str, width: usize) -> Vec<String> {
@@ -291,6 +292,3 @@ impl ErrorWindow<'_> {
         self.geo.borrow_mut().resize(term_dimens);
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -178,7 +178,16 @@ impl FeedControler<'_> {
         {
             self.feed.selected = selected - 1;
         }
-        // FIXME: Add scrolling when selected is out of bounds
+        if let Some(after_selected) = self.feed.items.iter().skip(self.feed.selected + 1).next() {
+            let last_at = after_selected.at.unwrap() as u16;
+            let last_line = self.textpad.first + geo.term_height;
+            if last_at > last_line {
+                self.scroll(&mut qc, Direction::Down)?;
+                self.scroll(&mut qc, Direction::Down)?;
+            } else if last_at == last_line {
+                self.scroll(&mut qc, Direction::Down)?;
+            }
+        }
         self.redraw_selected(&mut qc, true)?;
         Ok(self.feed.selected == last_selected)
     }
@@ -196,7 +205,6 @@ impl FeedControler<'_> {
         Ok(())
     }
 
-    // FIXME: Selected goes out of bounds when there are a lot of new articles
     pub fn refresh(&mut self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
         const HEIGHT: u16 = 5;
         qc.queue(terminal::ScrollDown(HEIGHT))?;
@@ -226,10 +234,8 @@ impl FeedControler<'_> {
             self.textpad.geo.borrow_mut().change_view(View::Feed);
             self.textpad.build();
             self.set_positions();
-            self.feed.selected += num_new;
-            if self.textpad.first != 0 {
-                self.textpad
-                    .scroll_by_lines(&mut qc, self.feed.items[num_new].at.unwrap() as i16)?;
+            for _ in 0..num_new {
+                self.move_select(&mut qc, Direction::Down)?;
             }
         }
         Ok(())

@@ -24,9 +24,14 @@ impl NewsSite for Danas {
 impl Parser for Danas {
     fn parse_article_content(&self, elem: scraper::ElementRef) -> Option<Components> {
         match elem.value().name() {
-            // FIXME: Text with some json appears
             "p" => {
+                if elem.child_elements().next().map(|e| e.value().name()) == Some("script") {
+                    return None;
+                }
                 let text: String = elem.text().collect();
+                if text.trim().is_empty() {
+                    return None;
+                }
                 Some(Components::Paragraph(text))
             }
             "div" => {
@@ -44,7 +49,7 @@ impl Parser for Danas {
                     .collect();
                 Some(Components::Boxed(paragraphs))
             }
-            "h2" => {
+            "h2" | "h3" => {
                 let text: String = elem.text().collect();
                 Some(Components::Subtitle(text))
             }

@@ -17,6 +17,7 @@ cargo build -r
 Then move the resulting binary (found in target/release/) into a directory in your $PATH
 
 ## TODOs
- - Add more scrapers (Politika, Vreme, Radar, Nin...)
- - Add filtering by topic
+ - Add filtering by topic and source
  - Add configuration (colors, positioning, ...)
+ - Consider adding Blog and Media (Picture and Video) components
+ - Consider adding more scrapers (Politika, Vreme, Radar, Nin...)
