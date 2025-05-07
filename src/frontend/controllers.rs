@@ -64,6 +64,7 @@ impl FeedControler<'_> {
         Ok(())
     }
 
+    // FIXME: Do with Components in mind
     pub fn redraw_selected(
         &self,
         mut qc: impl QueueableCommand + Write,
@@ -134,6 +135,7 @@ impl FeedControler<'_> {
         Ok(())
     }
 
+    // TODO: Consider doing this within ComponentContent
     pub fn set_positions(&mut self) {
         let mut items = self.feed.items.iter_mut();
         for (i, line) in self.textpad.content.iter().enumerate() {
@@ -229,9 +231,8 @@ impl FeedControler<'_> {
                 .map(|i| i.build())
                 .rev();
             for comp in new_comps {
-                self.textpad.components.push_front(comp);
+                self.textpad.components.push_front(comp.into());
             }
-            self.textpad.geo.borrow_mut().change_view(View::Feed);
             self.textpad.build();
             self.set_positions();
             for _ in 0..num_new {
@@ -255,6 +256,7 @@ impl FeedControler<'_> {
             .run(&mut qc)?,
         }
         self.textpad.geo.borrow_mut().change_view(View::Feed);
+        // FIXME: Add self.textpad.resize();
         self.draw(&mut qc)?;
         Ok(())
     }

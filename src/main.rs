@@ -10,7 +10,7 @@ use crossterm::{
     execute,
     terminal::{self, ClearType},
 };
-use frontend::{Components, Geometry, TextPad};
+use frontend::{ComponentKind, Geometry, TextPad};
 use input::*;
 use reqwest::blocking::Client;
 use std::{
@@ -119,7 +119,7 @@ struct ArticleControler<'a> {
 
 impl<'a> ArticleControler<'a> {
     pub fn build(
-        content: Vec<Components>,
+        content: Vec<ComponentKind>,
         geo: &'a Rc<RefCell<Geometry>>,
         mut qc: impl QueueableCommand + Write,
     ) -> io::Result<Self> {

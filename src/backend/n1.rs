@@ -1,7 +1,7 @@
 use std::{error::Error, fmt::Display, rc::Rc};
 
 use super::{BackendError, FeedItem, NewsSite, Parser};
-use crate::frontend::Components;
+use crate::frontend::ComponentKind;
 use reqwest::blocking::Client;
 use scraper::{ElementRef, Html, Selector};
 
@@ -20,7 +20,7 @@ impl NewsSite for N1 {
 }
 
 impl Parser for N1 {
-    fn parse_article_content(&self, elem: ElementRef) -> Option<Components> {
+    fn parse_article_content(&self, elem: ElementRef) -> Option<ComponentKind> {
         match elem.value().name() {
             "p" => {
                 let text: String = elem.text().collect();
@@ -29,10 +29,10 @@ impl Parser for N1 {
                 }
                 if let Some(inner) = elem.child_elements().next() {
                     if inner.attr("data-attribute-id") == Some("emphasized-text") {
-                        return Some(Components::Lead(text));
+                        return Some(ComponentKind::Lead(text));
                     }
                 }
-                Some(Components::Paragraph(text))
+                Some(ComponentKind::Paragraph(text))
             }
             "section" => {
                 let blockqoute_selector = Selector::parse("blockquote").unwrap();
@@ -43,7 +43,7 @@ impl Parser for N1 {
                         .filter(|e| e.value().name() == "p")
                         .map(|p| p.text().collect())
                         .collect();
-                    return Some(Components::Boxed(paragraphs));
+                    return Some(ComponentKind::Boxed(paragraphs));
                 }
                 None
             }
@@ -52,14 +52,14 @@ impl Parser for N1 {
                 if text.is_empty() {
                     return None;
                 }
-                Some(Components::Subtitle(text))
+                Some(ComponentKind::Subtitle(text))
             }
             // TODO: Blog
             _ => None,
         }
     }
 
-    fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError> {
+    fn parse_article(&self, html: Html) -> Result<Vec<ComponentKind>, BackendError> {
         super::parsers::parse_article(Rc::new(Self), html, ".entry-content")
     }
 }

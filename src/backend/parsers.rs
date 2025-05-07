@@ -5,13 +5,13 @@ use reqwest::blocking::Client;
 use rss::Channel;
 use scraper::{ElementRef, Html, Selector};
 
-use crate::{FeedItem, frontend::Components};
+use crate::{FeedItem, frontend::ComponentKind};
 
 use super::{BackendError, NewsSite};
 
 pub trait Parser {
-    fn parse_article_content(&self, elem: ElementRef) -> Option<Components>;
-    fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError>;
+    fn parse_article_content(&self, elem: ElementRef) -> Option<ComponentKind>;
+    fn parse_article(&self, html: Html) -> Result<Vec<ComponentKind>, BackendError>;
 }
 
 pub fn get_feed_items(
@@ -48,7 +48,7 @@ pub fn parse_article(
     parser: Rc<dyn Parser>,
     html: Html,
     content_selector: &str,
-) -> Result<Vec<Components>, BackendError> {
+) -> Result<Vec<ComponentKind>, BackendError> {
     let content_selector = Selector::parse(content_selector).unwrap();
 
     let article = html

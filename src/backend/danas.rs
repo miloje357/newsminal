@@ -3,7 +3,7 @@ use std::{error::Error, fmt::Display, rc::Rc};
 use reqwest::blocking::Client;
 use scraper::Html;
 
-use crate::{FeedItem, frontend::Components};
+use crate::{FeedItem, frontend::ComponentKind};
 
 use super::{BackendError, NewsSite, Parser};
 
@@ -22,7 +22,7 @@ impl NewsSite for Danas {
 }
 
 impl Parser for Danas {
-    fn parse_article_content(&self, elem: scraper::ElementRef) -> Option<Components> {
+    fn parse_article_content(&self, elem: scraper::ElementRef) -> Option<ComponentKind> {
         match elem.value().name() {
             "p" => {
                 if elem.child_elements().next().map(|e| e.value().name()) == Some("script") {
@@ -32,12 +32,12 @@ impl Parser for Danas {
                 if text.trim().is_empty() {
                     return None;
                 }
-                Some(Components::Paragraph(text))
+                Some(ComponentKind::Paragraph(text))
             }
             "div" => {
                 if elem.value().classes().any(|c| c == "post-intro-content") {
                     let lead_text = elem.text().collect();
-                    return Some(Components::Lead(lead_text));
+                    return Some(ComponentKind::Lead(lead_text));
                 }
                 None
             }
@@ -47,11 +47,11 @@ impl Parser for Danas {
                     .filter(|e| e.value().name() == "p")
                     .map(|p| p.text().collect())
                     .collect();
-                Some(Components::Boxed(paragraphs))
+                Some(ComponentKind::Boxed(paragraphs))
             }
             "h2" | "h3" => {
                 let text: String = elem.text().collect();
-                Some(Components::Subtitle(text))
+                Some(ComponentKind::Subtitle(text))
             }
             _ => None,
         }
@@ -59,7 +59,7 @@ impl Parser for Danas {
 
     // FIXME: BBC articles don't work
     //        (CONTENT_SELECTOR should be ".content div.flex .w-full div")
-    fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError> {
+    fn parse_article(&self, html: Html) -> Result<Vec<ComponentKind>, BackendError> {
         super::parsers::parse_article(Rc::new(Self), html, ".content div.flex .w-full")
     }
 }

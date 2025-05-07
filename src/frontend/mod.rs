@@ -13,7 +13,8 @@ use std::{
     rc::Rc,
 };
 
-pub enum Components {
+#[derive(Debug)]
+pub enum ComponentKind {
     Title(String),
     Subtitle(String),
     Lead(String),
@@ -21,19 +22,52 @@ pub enum Components {
     Boxed(Vec<String>),
 }
 
-pub fn build_componenets(components: &[Components], width: usize) -> Vec<String> {
-    components
-        .iter()
-        .flat_map(|comp| match comp {
-            Components::Title(text) => Title::build(&text, width),
-            Components::Subtitle(text) => Subtitle::build(&text, width),
-            Components::Lead(text) => Lead::build(&text, width),
-            Components::Paragraph(text) => Paragraph::build(&text, width),
-            Components::Boxed(text) => Boxed::build(&text.join("\n"), width),
-        })
-        .collect()
+#[derive(Debug)]
+enum ComponentState {
+    ToBuild,
+    Built(Vec<String>),
 }
 
+#[derive(Debug)]
+pub struct Component {
+    comp_type: ComponentKind,
+    content: ComponentState,
+}
+
+impl Component {
+    fn new(comp_type: ComponentKind) -> Self {
+        Self {
+            comp_type,
+            content: ComponentState::ToBuild,
+        }
+    }
+
+    fn build(&mut self, width: usize) {
+        self.content = ComponentState::Built(match &self.comp_type {
+            ComponentKind::Title(text) => Title::build(&text, width),
+            ComponentKind::Subtitle(text) => Subtitle::build(&text, width),
+            ComponentKind::Lead(text) => Lead::build(&text, width),
+            ComponentKind::Paragraph(text) => Paragraph::build(&text, width),
+            ComponentKind::Boxed(text) => Boxed::build(&text.join("\n"), width),
+        });
+    }
+
+    fn content(&self) -> Option<Vec<String>> {
+        match &self.content {
+            ComponentState::ToBuild => None,
+            ComponentState::Built(content) => Some(content.clone()),
+        }
+    }
+}
+
+impl From<ComponentKind> for Component {
+    fn from(value: ComponentKind) -> Self {
+        Self::new(value)
+    }
+}
+
+// TODO: Consider adding a changed: bool field so that textpad only need to redraw when changed ==
+//       true
 pub struct Geometry {
     term_height: u16,
     term_width: u16,
@@ -70,6 +104,8 @@ impl Geometry {
         self.startx = (self.term_width - self.width) / 2;
     }
 
+    // TODO: Consider returning term_width == width so that the textpad need to rebuild only when
+    //       term_width == width
     pub fn resize(&mut self, term_dimens: (u16, u16)) {
         let (term_width, term_height) = term_dimens;
         self.term_width = term_width;
@@ -80,34 +116,56 @@ impl Geometry {
 }
 
 pub struct TextPad<'a> {
-    components: VecDeque<Components>,
+    components: VecDeque<Component>,
     content: Vec<String>,
     first: u16,
     pub geo: &'a Rc<RefCell<Geometry>>,
 }
 
 impl<'a> TextPad<'a> {
-    pub fn new(components: Vec<Components>, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
+    pub fn new(components: Vec<ComponentKind>, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
+        let mut components: Vec<Component> =
+            components.into_iter().map(|comp| comp.into()).collect();
+        for comp in components.iter_mut() {
+            comp.build(geo.borrow().width as usize);
+        }
         Ok(Self {
-            content: build_componenets(&components, geo.borrow().width as usize),
+            content: components
+                .iter()
+                .flat_map(|comp| comp.content().unwrap())
+                .collect(),
             components: components.into(),
             first: 0,
             geo,
         })
     }
 
-    fn build(&mut self) {
+    fn comps_to_content(&mut self) {
+        self.content = self
+            .components
+            .iter()
+            .flat_map(|comp| comp.content().unwrap())
+            .collect();
+    }
+
+    pub fn build(&mut self) {
         let width = self.geo.borrow().width as usize;
-        let (first, last) = self.components.as_slices();
-        let first = build_componenets(first, width);
-        let last = build_componenets(last, width);
-        self.content = first;
-        self.content.extend(last);
+        for comp in self.components.iter_mut() {
+            if comp.content().is_some() {
+                continue;
+            }
+            comp.build(width);
+        }
+        self.comps_to_content();
     }
 
     pub fn resize(&mut self, term_dimens: (u16, u16)) {
         self.geo.borrow_mut().resize(term_dimens);
-        self.build();
+        let width = self.geo.borrow().width as usize;
+        for comp in self.components.iter_mut() {
+            comp.build(width);
+        }
+        self.comps_to_content();
     }
 
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
@@ -188,14 +246,14 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     res
 }
 
-pub trait Component {
+pub trait Buildable {
     fn build(text: &str, width: usize) -> Vec<String>;
 }
 
 // BUG: Doesn't display utf-8 properly
 // FIXME: Breaks make turn into \n which aren't accounted for
 pub struct Paragraph;
-impl Component for Paragraph {
+impl Buildable for Paragraph {
     fn build(text: &str, width: usize) -> Vec<String> {
         const IDENT: usize = 4;
         let mut res = vec![String::new()];
@@ -206,7 +264,7 @@ impl Component for Paragraph {
 }
 
 pub struct Title;
-impl Component for Title {
+impl Buildable for Title {
     fn build(text: &str, width: usize) -> Vec<String> {
         let mut res = vec![String::new()];
         let wraped_text = wrap_text(text.trim(), width);
@@ -222,7 +280,7 @@ impl Component for Title {
 }
 
 pub struct Lead;
-impl Component for Lead {
+impl Buildable for Lead {
     fn build(text: &str, width: usize) -> Vec<String> {
         Paragraph::build(text, width)
             .iter()
@@ -232,7 +290,7 @@ impl Component for Lead {
 }
 
 pub struct Subtitle;
-impl Component for Subtitle {
+impl Buildable for Subtitle {
     fn build(text: &str, width: usize) -> Vec<String> {
         let mut res = vec![String::new()];
         res.extend(
@@ -245,7 +303,7 @@ impl Component for Subtitle {
 }
 
 pub struct Boxed;
-impl Component for Boxed {
+impl Buildable for Boxed {
     fn build(text: &str, width: usize) -> Vec<String> {
         let mut res = vec![" ".repeat(width).to_string()];
         res.push(format!(" ┌{}┐ ", "─".repeat(width - 4)));
@@ -261,10 +319,10 @@ impl Component for Boxed {
 }
 
 impl FeedItem {
-    pub fn build(&self) -> Components {
+    pub fn build(&self) -> ComponentKind {
         let mut rows = vec![self.title.clone()];
         rows.push(self.published.to_string());
-        Components::Boxed(rows)
+        ComponentKind::Boxed(rows)
     }
 }
 
@@ -274,8 +332,10 @@ impl ErrorWindow<'_> {
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
         let geo = self.geo.borrow();
         let component = vec![self.msg.clone()];
-        let component = Components::Boxed(component);
-        let lines = build_componenets(&[component], geo.width as usize);
+        let component = ComponentKind::Boxed(component);
+        let mut component = Component::new(component);
+        component.build(geo.width as usize);
+        let lines = component.content().unwrap();
 
         let starty = (geo.term_height - lines.len() as u16) / 2;
         qc.queue(terminal::Clear(terminal::ClearType::All))?

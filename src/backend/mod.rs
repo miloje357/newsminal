@@ -3,7 +3,7 @@ mod insajder;
 mod n1;
 mod parsers;
 
-use crate::{Body, Feed, FeedItem, frontend::Components};
+use crate::{Body, Feed, FeedItem, frontend::ComponentKind};
 use chrono::{DateTime, Local};
 use danas::Danas;
 use insajder::Insajder;
@@ -36,19 +36,19 @@ pub trait NewsSite: Display + Parser {
 }
 
 impl FeedItem {
-    pub fn get_article(&self) -> Result<Vec<Components>, Box<dyn Error>> {
+    pub fn get_article(&self) -> Result<Vec<ComponentKind>, Box<dyn Error>> {
         match &self.body {
             Body::Fetched { html, lead } => {
                 let mut body = vec![
-                    Components::Title(self.title.clone()),
-                    Components::Lead(lead.to_string()),
+                    ComponentKind::Title(self.title.clone()),
+                    ComponentKind::Lead(lead.to_string()),
                 ];
                 let html = Html::parse_fragment(&html);
                 body.extend(self.parser.parse_article(html)?);
                 Ok(body)
             }
             Body::ToFetch { url } => {
-                let mut body = vec![Components::Title(self.title.clone())];
+                let mut body = vec![ComponentKind::Title(self.title.clone())];
                 let html = reqwest::blocking::get(url)?;
                 let html = html.error_for_status()?.text()?;
                 let html = Html::parse_document(&html);
