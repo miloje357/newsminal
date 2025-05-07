@@ -298,6 +298,7 @@ impl Drop for ScreenState {
     }
 }
 
+// TODO: Add a option url so that newsminal only parses that website
 // TODO: Add a help command
 fn main() {
     let feed = Feed::new().unwrap_or_else(|err| {
