@@ -223,16 +223,8 @@ impl FeedControler<'_> {
             return Ok(());
         }
         if let Some(num_new) = num_new {
-            let new_comps = self
-                .feed
-                .items
-                .iter()
-                .take(num_new)
-                .map(|i| i.build())
-                .rev();
-            for comp in new_comps {
-                self.textpad.components.push_front(comp.into());
-            }
+            let new_comps = self.feed.items.iter().take(num_new).map(|i| i.build());
+            self.textpad.components.push_front(new_comps);
             self.textpad.build();
             self.set_positions();
             for _ in 0..num_new {

@@ -143,7 +143,8 @@ impl Runnable for ArticleControler<'_> {
         match self.input.map(event, View::Article) {
             Some(Controls::Quit) => return Ok(false),
             Some(Controls::Resize(new_dimens)) => {
-                self.textpad.resize(new_dimens);
+                self.textpad.geo.borrow_mut().resize(new_dimens);
+                self.textpad.build();
                 self.textpad.draw(&mut qc)?;
                 qc.flush()?;
             }
@@ -217,7 +218,8 @@ impl Runnable for FeedControler<'_> {
                 qc.flush()?;
             }
             Some(Controls::Resize(new_dimens)) => {
-                self.textpad.resize(new_dimens);
+                self.textpad.geo.borrow_mut().resize(new_dimens);
+                self.textpad.build();
                 self.draw(&mut qc)?;
                 qc.flush()?;
             }

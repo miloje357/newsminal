@@ -66,6 +66,51 @@ impl From<ComponentKind> for Component {
     }
 }
 
+struct Components {
+    items: VecDeque<Component>,
+    width: usize,
+}
+
+impl Components {
+    fn new(comps: Vec<ComponentKind>, width: usize) -> Self {
+        let comps: Vec<Component> = comps
+            .into_iter()
+            .map(|comp| {
+                let mut comp: Component = comp.into();
+                comp.build(width);
+                comp
+            })
+            .collect();
+        Self {
+            items: comps.into(),
+            width,
+        }
+    }
+
+    fn build(&mut self, new_width: usize) {
+        for comp in self.items.iter_mut() {
+            if self.width == new_width && comp.content().is_some() {
+                continue;
+            }
+            comp.build(new_width);
+        }
+        self.width = new_width;
+    }
+
+    fn to_lines(&self) -> Vec<String> {
+        self.items
+            .iter()
+            .flat_map(|comp| comp.content().unwrap())
+            .collect()
+    }
+
+    fn push_front(&mut self, new_items: impl DoubleEndedIterator<Item = ComponentKind>) {
+        for comp in new_items.rev() {
+            self.items.push_front(comp.into());
+        }
+    }
+}
+
 // TODO: Consider adding a changed: bool field so that textpad only need to redraw when changed ==
 //       true
 pub struct Geometry {
@@ -116,7 +161,7 @@ impl Geometry {
 }
 
 pub struct TextPad<'a> {
-    components: VecDeque<Component>,
+    components: Components,
     content: Vec<String>,
     first: u16,
     pub geo: &'a Rc<RefCell<Geometry>>,
@@ -124,48 +169,19 @@ pub struct TextPad<'a> {
 
 impl<'a> TextPad<'a> {
     pub fn new(components: Vec<ComponentKind>, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
-        let mut components: Vec<Component> =
-            components.into_iter().map(|comp| comp.into()).collect();
-        for comp in components.iter_mut() {
-            comp.build(geo.borrow().width as usize);
-        }
+        let components = Components::new(components, geo.borrow().width as usize);
         Ok(Self {
-            content: components
-                .iter()
-                .flat_map(|comp| comp.content().unwrap())
-                .collect(),
-            components: components.into(),
+            content: components.to_lines(),
+            components,
             first: 0,
             geo,
         })
     }
 
-    fn comps_to_content(&mut self) {
-        self.content = self
-            .components
-            .iter()
-            .flat_map(|comp| comp.content().unwrap())
-            .collect();
-    }
-
     pub fn build(&mut self) {
         let width = self.geo.borrow().width as usize;
-        for comp in self.components.iter_mut() {
-            if comp.content().is_some() {
-                continue;
-            }
-            comp.build(width);
-        }
-        self.comps_to_content();
-    }
-
-    pub fn resize(&mut self, term_dimens: (u16, u16)) {
-        self.geo.borrow_mut().resize(term_dimens);
-        let width = self.geo.borrow().width as usize;
-        for comp in self.components.iter_mut() {
-            comp.build(width);
-        }
-        self.comps_to_content();
+        self.components.build(width);
+        self.content = self.components.to_lines()
     }
 
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
