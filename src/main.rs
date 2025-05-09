@@ -2,7 +2,7 @@ mod backend;
 mod frontend;
 mod input;
 
-use backend::NewsSite;
+use backend::{NewsSite, deserialize_parser, serialize_parser};
 use chrono::{DateTime, Local};
 use crossterm::{
     QueueableCommand, cursor,
@@ -13,16 +13,18 @@ use crossterm::{
 use frontend::{ComponentKind, Geometry, TextPad};
 use input::*;
 use reqwest::blocking::Client;
+use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
     collections::VecDeque,
     io::{self, Write, stdout},
-    panic, process,
+    panic,
     rc::Rc,
     thread,
     time::{Duration, Instant},
 };
 
+#[derive(Serialize, Deserialize)]
 enum Body {
     Fetched { html: String, lead: String },
     ToFetch { url: String },
@@ -30,10 +32,15 @@ enum Body {
 
 // TODO: Add is_read: bool field
 // TODO: Add is_new: bool field
+#[derive(Serialize, Deserialize)]
 pub struct FeedItem {
     title: String,
     published: DateTime<Local>,
     body: Body,
+    #[serde(
+        serialize_with = "serialize_parser",
+        deserialize_with = "deserialize_parser"
+    )]
     parser: Rc<dyn NewsSite>,
 }
 
@@ -300,10 +307,24 @@ impl Drop for ScreenState {
 
 // TODO: Add a help command
 fn main() -> io::Result<()> {
-    let feed = Feed::new().unwrap_or_else(|err| {
-        eprintln!("Couldn't get feed: {err}");
-        process::exit(1);
-    });
+    let feed = {
+        #[cfg(feature = "testdata")]
+        {
+            use std::{fs::File, io::Read};
+
+            let mut file = File::open("feed.json")?;
+            let mut json = String::new();
+            file.read_to_string(&mut json)?;
+            Feed::from_json(json)?
+        }
+        #[cfg(not(feature = "testdata"))]
+        {
+            Feed::new().unwrap_or_else(|err| {
+                eprintln!("Couldn't get feed: {err}");
+                std::process::exit(1);
+            })
+        }
+    };
 
     let default_hook = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
