@@ -12,13 +12,18 @@ use crossterm::{
 };
 use frontend::{ComponentKind, Geometry, TextPad};
 use input::*;
+use log::LevelFilter;
+use log4rs::append::file::FileAppender;
+use log4rs::config::{Appender, Config, Root};
+use log4rs::encode::pattern::PatternEncoder;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::{
     cell::RefCell,
     collections::VecDeque,
+    error::Error,
     io::{self, Write, stdout},
-    panic,
+    panic, process,
     rc::Rc,
     thread,
     time::{Duration, Instant},
@@ -305,8 +310,34 @@ impl Drop for ScreenState {
     }
 }
 
+fn init_logging() -> Result<(), Box<dyn Error>> {
+    const PATTERN: &str = "{l} - {m}\n";
+    const LOGGER_NAME: &str = "logfile";
+    const MIN_LOG_LEVEL: LevelFilter = LevelFilter::Debug;
+
+    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
+    let logfile = format!("logs/newsminal_{}.log", timestamp);
+
+    let logfile = FileAppender::builder()
+        .encoder(Box::new(PatternEncoder::new(PATTERN)))
+        .build(logfile)?;
+
+    let config = Config::builder()
+        .appender(Appender::builder().build(LOGGER_NAME, Box::new(logfile)))
+        .build(Root::builder().appender(LOGGER_NAME).build(MIN_LOG_LEVEL))?;
+
+    log4rs::init_config(config)?;
+    Ok(())
+}
+
 // TODO: Add a help command
 fn main() -> io::Result<()> {
+    init_logging().unwrap_or_else(|err| {
+        eprintln!("Couldn't init logger: {err}");
+        process::exit(1);
+    });
+    log::info!("Started logging");
+
     let feed = {
         #[cfg(feature = "testdata")]
         {
