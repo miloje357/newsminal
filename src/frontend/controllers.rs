@@ -37,54 +37,34 @@ impl FeedControler<'_> {
     fn scroll(&mut self, mut qc: impl QueueableCommand + Write, dir: Direction) -> io::Result<()> {
         match dir {
             Direction::Up => {
-                let lines = self
-                    .textpad
-                    .content
-                    .iter()
-                    .take(self.textpad.first as usize)
-                    .rev()
-                    .take_while(|line| !line.chars().all(|c| c.is_whitespace()))
-                    .count() as i16
-                    + 1;
+                let lines: i16 =
+                    self.textpad.first as i16 - self.textpad.first_visible_comp().posy() as i16;
                 self.textpad.scroll_by_lines(&mut qc, -lines)?;
             }
             Direction::Down => {
                 let term_height = self.textpad.geo.borrow().term_height;
-                let lines = self
-                    .textpad
-                    .content
-                    .iter()
-                    .skip((self.textpad.first + term_height) as usize + 1)
-                    .take_while(|line| !line.chars().all(|c| c.is_whitespace()))
-                    .count() as i16
-                    + 1;
+                let last = self.textpad.last_visible_comp();
+                let mut lines: i16 =
+                    last.posy() as i16 - (self.textpad.first as i16 + term_height as i16);
+                if lines == 0 {
+                    lines = last.content().len() as i16
+                }
                 self.textpad.scroll_by_lines(&mut qc, lines)?;
             }
         }
         Ok(())
     }
 
-    // FIXME: Do with Components in mind
+    // FIXME: Do with styled Components
     pub fn redraw_selected(
         &self,
         mut qc: impl QueueableCommand + Write,
         is_selected: bool,
     ) -> io::Result<()> {
         let startx = self.textpad.geo.borrow().startx;
-        let first_row = self.feed.items[self.feed.selected].at.unwrap();
-        let last_row = {
-            if self.feed.selected + 1 >= self.feed.items.len() {
-                self.textpad.content.len()
-            } else {
-                self.feed.items[self.feed.selected + 1].at.unwrap()
-            }
-        };
-        let item_content = &self.textpad.content[first_row..last_row];
-        qc.queue(cursor::MoveTo(
-            startx,
-            first_row as u16 - self.textpad.first,
-        ))?;
-        for line in item_content {
+        let comp = &self.textpad.components.items[self.feed.selected];
+        qc.queue(cursor::MoveTo(startx, comp.posy() - self.textpad.first))?;
+        for line in comp.content() {
             if is_selected {
                 qc.queue(style::PrintStyledContent(line.clone().red()))?;
             } else {
@@ -101,50 +81,36 @@ impl FeedControler<'_> {
         mut qc: impl QueueableCommand + Write,
         dir: Direction,
     ) -> io::Result<()> {
-        let term_height = self.textpad.geo.borrow().term_height;
         self.redraw_selected(&mut qc, false)?;
         match dir {
             Direction::Up => {
                 if self.feed.selected > 0 {
                     self.feed.selected -= 1;
-                    if self.feed.selected > 0 {
-                        let next_row = self.feed.items[self.feed.selected - 1].at.unwrap() as u16;
-                        if next_row < self.textpad.first {
-                            self.scroll(&mut qc, dir)?;
-                        }
-                    }
+                }
+                if self.feed.selected > 0
+                    && self.textpad.first_visible_comp()
+                        == &self.textpad.components.items[self.feed.selected - 1]
+                {
+                    self.scroll(&mut qc, dir)?;
                 }
             }
             Direction::Down => {
                 if self.feed.selected < self.feed.items.len() - 1 {
                     self.feed.selected += 1;
-                    let next_row = if self.feed.selected < self.feed.items.len() - 2 {
-                        self.feed.items[self.feed.selected + 2].at.unwrap() as u16
-                    } else if self.feed.selected < self.feed.items.len() - 1 {
-                        self.feed.items[self.feed.selected + 1].at.unwrap() as u16
-                    } else {
-                        self.textpad.first
-                    };
-                    if next_row - self.textpad.first >= term_height {
-                        self.scroll(&mut qc, dir)?;
-                    }
+                }
+                // BUG: Scrolls weirdly when end is reached
+                let last_visible = self.textpad.last_visible_comp();
+                if (self.feed.selected < self.feed.items.len() - 2
+                    && last_visible == &self.textpad.components.items[self.feed.selected + 2])
+                    || (self.feed.selected < self.feed.items.len() - 1
+                        && last_visible == &self.textpad.components.items[self.feed.selected + 1])
+                {
+                    self.scroll(&mut qc, dir)?;
                 }
             }
         };
         self.redraw_selected(&mut qc, true)?;
         Ok(())
-    }
-
-    // TODO: Consider doing this within ComponentContent
-    pub fn set_positions(&mut self) {
-        let mut items = self.feed.items.iter_mut();
-        for (i, line) in self.textpad.content.iter().enumerate() {
-            if line.chars().all(|c| c.is_whitespace()) {
-                if let Some(item) = items.next() {
-                    item.at = Some(i);
-                }
-            }
-        }
     }
 
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
@@ -173,15 +139,24 @@ impl FeedControler<'_> {
         // TODO: Optimize
         let last_selected = self.feed.selected;
         if let Some(selected) = self
-            .feed
+            .textpad
+            .components
             .items
             .iter()
-            .position(|i| y + self.textpad.first < i.at.unwrap() as u16)
+            .position(|i| y + self.textpad.first < i.posy())
         {
             self.feed.selected = selected - 1;
         }
-        if let Some(after_selected) = self.feed.items.iter().skip(self.feed.selected + 1).next() {
-            let last_at = after_selected.at.unwrap() as u16;
+        // BUG: Doesn't work when you select a top out-of-bounds feeditem
+        if let Some(after_selected) = self
+            .textpad
+            .components
+            .items
+            .iter()
+            .skip(self.feed.selected + 1)
+            .next()
+        {
+            let last_at = after_selected.posy();
             let last_line = self.textpad.first + geo.term_height;
             if last_at > last_line {
                 self.scroll(&mut qc, Direction::Down)?;
@@ -222,11 +197,11 @@ impl FeedControler<'_> {
         if num_new == Some(0) {
             return Ok(());
         }
+        // BUG:
         if let Some(num_new) = num_new {
             let new_comps = self.feed.items.iter().take(num_new).map(|i| i.build());
             self.textpad.components.push_front(new_comps);
             self.textpad.build();
-            self.set_positions();
             for _ in 0..num_new {
                 self.move_select(&mut qc, Direction::Down)?;
             }

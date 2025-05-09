@@ -31,7 +31,6 @@ pub fn get_feed_items(
                 published: DateTime::parse_from_rfc2822(&item.pub_date.clone()?)
                     .ok()?
                     .into(),
-                at: None,
                 body: crate::Body::ToFetch {
                     url: item
                         .link

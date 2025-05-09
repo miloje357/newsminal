@@ -13,7 +13,7 @@ use std::{
     rc::Rc,
 };
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ComponentKind {
     Title(String),
     Subtitle(String),
@@ -22,13 +22,13 @@ pub enum ComponentKind {
     Boxed(Vec<String>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum ComponentState {
     ToBuild,
-    Built(Vec<String>),
+    Built { lines: Vec<String>, posy: u16 },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Component {
     comp_type: ComponentKind,
     content: ComponentState,
@@ -42,21 +42,39 @@ impl Component {
         }
     }
 
-    fn build(&mut self, width: usize) {
-        self.content = ComponentState::Built(match &self.comp_type {
+    fn build(&mut self, width: usize, posy: u16) {
+        let lines = match &self.comp_type {
             ComponentKind::Title(text) => Title::build(&text, width),
             ComponentKind::Subtitle(text) => Subtitle::build(&text, width),
             ComponentKind::Lead(text) => Lead::build(&text, width),
             ComponentKind::Paragraph(text) => Paragraph::build(&text, width),
             ComponentKind::Boxed(text) => Boxed::build(&text.join("\n"), width),
-        });
+        };
+        self.content = ComponentState::Built { lines, posy }
     }
 
-    fn content(&self) -> Option<Vec<String>> {
+    fn content(&self) -> Vec<String> {
         match &self.content {
-            ComponentState::ToBuild => None,
-            ComponentState::Built(content) => Some(content.clone()),
+            ComponentState::ToBuild => panic!(
+                "Couldn't get content because the component ({:#?}) wasn't built",
+                self
+            ),
+            ComponentState::Built { lines, .. } => lines.clone(),
         }
+    }
+
+    fn posy(&self) -> u16 {
+        match &self.content {
+            ComponentState::ToBuild => panic!(
+                "Couldn't get posy because the component ({:#?}) wasn't built",
+                self
+            ),
+            ComponentState::Built { posy, .. } => *posy,
+        }
+    }
+
+    fn is_built(&self) -> bool {
+        self.content != ComponentState::ToBuild
     }
 }
 
@@ -66,6 +84,7 @@ impl From<ComponentKind> for Component {
     }
 }
 
+#[derive(Debug)]
 struct Components {
     items: VecDeque<Component>,
     width: usize,
@@ -73,11 +92,13 @@ struct Components {
 
 impl Components {
     fn new(comps: Vec<ComponentKind>, width: usize) -> Self {
+        let mut posy = 0;
         let comps: Vec<Component> = comps
             .into_iter()
             .map(|comp| {
                 let mut comp: Component = comp.into();
-                comp.build(width);
+                comp.build(width, posy);
+                posy += comp.content().len() as u16;
                 comp
             })
             .collect();
@@ -88,20 +109,20 @@ impl Components {
     }
 
     fn build(&mut self, new_width: usize) {
+        let mut posy = 0;
         for comp in self.items.iter_mut() {
-            if self.width == new_width && comp.content().is_some() {
+            if self.width == new_width && comp.is_built() {
+                posy = comp.posy();
                 continue;
             }
-            comp.build(new_width);
+            comp.build(new_width, posy);
+            posy += comp.content().len() as u16;
         }
         self.width = new_width;
     }
 
     fn to_lines(&self) -> Vec<String> {
-        self.items
-            .iter()
-            .flat_map(|comp| comp.content().unwrap())
-            .collect()
+        self.items.iter().flat_map(|comp| comp.content()).collect()
     }
 
     fn push_front(&mut self, new_items: impl DoubleEndedIterator<Item = ComponentKind>) {
@@ -160,6 +181,7 @@ impl Geometry {
     }
 }
 
+// TODO: Consider adding first and last visible components
 pub struct TextPad<'a> {
     components: Components,
     content: Vec<String>,
@@ -168,20 +190,20 @@ pub struct TextPad<'a> {
 }
 
 impl<'a> TextPad<'a> {
-    pub fn new(components: Vec<ComponentKind>, geo: &'a Rc<RefCell<Geometry>>) -> io::Result<Self> {
+    pub fn new(components: Vec<ComponentKind>, geo: &'a Rc<RefCell<Geometry>>) -> TextPad<'a> {
         let components = Components::new(components, geo.borrow().width as usize);
-        Ok(Self {
+        Self {
             content: components.to_lines(),
             components,
             first: 0,
             geo,
-        })
+        }
     }
 
     pub fn build(&mut self) {
         let width = self.geo.borrow().width as usize;
         self.components.build(width);
-        self.content = self.components.to_lines()
+        self.content = self.components.to_lines();
     }
 
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
@@ -243,6 +265,42 @@ impl<'a> TextPad<'a> {
                 .queue(cursor::MoveToColumn(geo.startx))?;
         }
         Ok(())
+    }
+
+    fn first_visible_comp(&self) -> &Component {
+        let mut first_comps = self
+            .components
+            .items
+            .iter()
+            .rev()
+            .skip_while(|comp| comp.posy() > self.first);
+        let first = first_comps.next().expect("No visible component found!");
+        if first.posy() == self.first {
+            first_comps.next().unwrap_or(first)
+        } else {
+            first
+        }
+    }
+
+    fn last_visible_comp(&self) -> &Component {
+        let term_heigth = self.geo.borrow().term_height;
+        let mut last_comps = self
+            .components
+            .items
+            .iter()
+            .skip_while(|comp| comp.posy() < self.first + term_heigth);
+        let last = last_comps.next().unwrap_or(
+            self.components
+                .items
+                .iter()
+                .last()
+                .expect("No loaded components"),
+        );
+        if last.posy() == self.first + term_heigth {
+            last_comps.next().unwrap_or(last)
+        } else {
+            last
+        }
     }
 }
 
@@ -350,8 +408,8 @@ impl ErrorWindow<'_> {
         let component = vec![self.msg.clone()];
         let component = ComponentKind::Boxed(component);
         let mut component = Component::new(component);
-        component.build(geo.width as usize);
-        let lines = component.content().unwrap();
+        component.build(geo.width as usize, 0);
+        let lines = component.content();
 
         let starty = (geo.term_height - lines.len() as u16) / 2;
         qc.queue(terminal::Clear(terminal::ClearType::All))?

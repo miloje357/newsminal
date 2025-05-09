@@ -33,7 +33,6 @@ enum Body {
 pub struct FeedItem {
     title: String,
     published: DateTime<Local>,
-    at: Option<usize>,
     body: Body,
     parser: Rc<dyn NewsSite>,
 }
@@ -122,9 +121,9 @@ impl<'a> ArticleControler<'a> {
         content: Vec<ComponentKind>,
         geo: &'a Rc<RefCell<Geometry>>,
         mut qc: impl QueueableCommand + Write,
-    ) -> io::Result<Self> {
+    ) -> io::Result<ArticleControler<'a>> {
         geo.borrow_mut().change_view(View::Article);
-        let textpad = TextPad::new(content, geo)?;
+        let textpad = TextPad::new(content, geo);
         textpad.draw(&mut qc)?;
         qc.flush()?;
         Ok(Self {
@@ -180,13 +179,12 @@ impl<'a> FeedControler<'a> {
         mut qc: impl QueueableCommand + Write,
     ) -> io::Result<Self> {
         let content = feed.items.iter().map(|i| i.build()).collect::<Vec<_>>();
-        let textpad = TextPad::new(content, geo)?;
-        let mut feed_controler = Self {
+        let textpad = TextPad::new(content, geo);
+        let feed_controler = Self {
             feed,
             textpad,
             input: InputBuffer::new(),
         };
-        feed_controler.set_positions();
         feed_controler.textpad.draw(&mut qc)?;
         feed_controler.redraw_selected(&mut qc, true)?;
         qc.flush()?;
@@ -301,36 +299,25 @@ impl Drop for ScreenState {
 }
 
 // TODO: Add a help command
-fn main() {
+fn main() -> io::Result<()> {
     let feed = Feed::new().unwrap_or_else(|err| {
         eprintln!("Couldn't get feed: {err}");
         process::exit(1);
     });
 
-    panic::set_hook(Box::new(|info| {
+    let default_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |info| {
         let _ = terminal::disable_raw_mode();
         let _ = execute!(stdout(), terminal::LeaveAlternateScreen);
         let _ = stdout().flush();
-        eprintln!("Panic occurred: {}", info);
+        default_hook(info)
     }));
 
-    let _screen_state = ScreenState::enable().unwrap_or_else(|err| {
-        eprintln!("Couldn't setup screen state: {err}");
-        process::exit(1);
-    });
-    let dimens = terminal::size().unwrap_or_else(|err| {
-        eprintln!("Couldn't get terminal dimentions: {err}");
-        process::exit(1);
-    });
+    let _screen_state = ScreenState::enable()?;
+    let dimens = terminal::size()?;
     let geo = Geometry::new(dimens);
     let geo = Rc::new(RefCell::new(geo));
     let mut stdout = stdout();
-    let mut feed_controler = FeedControler::build(feed, &geo, &mut stdout).unwrap_or_else(|err| {
-        eprintln!("Couldn't init the FeedControler: {err}");
-        process::exit(1);
-    });
-    feed_controler.run(&mut stdout).unwrap_or_else(|err| {
-        eprintln!("Display error: {err}");
-        process::exit(1);
-    });
+    let mut feed_controler = FeedControler::build(feed, &geo, &mut stdout)?;
+    feed_controler.run(&mut stdout)
 }

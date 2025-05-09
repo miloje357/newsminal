@@ -53,7 +53,6 @@ impl NewsSite for Insajder {
                     .unwrap()
                     .and_local_timezone(Local)
                     .unwrap(),
-                at: None,
                 body: Body::Fetched {
                     html: i.body,
                     lead: i.lead,
