@@ -63,7 +63,7 @@ impl Component {
         }
     }
 
-    fn posy(&self) -> u16 {
+    fn get_posy(&self) -> u16 {
         match &self.content {
             ComponentState::ToBuild => panic!(
                 "Couldn't get posy because the component ({:#?}) wasn't built",
@@ -73,8 +73,28 @@ impl Component {
         }
     }
 
+    fn set_posy(&mut self, new_posy: u16) {
+        match &self.content {
+            ComponentState::ToBuild => panic!(
+                "Couldn't set posy because the component ({:#?}) wasn't built",
+                self
+            ),
+            // TODO: Probably better to add a method set_posy to ComponentState
+            ComponentState::Built { lines, .. } => {
+                self.content = ComponentState::Built {
+                    lines: lines.to_vec(),
+                    posy: new_posy,
+                }
+            }
+        }
+    }
+
     fn is_built(&self) -> bool {
         self.content != ComponentState::ToBuild
+    }
+
+    fn height(&self) -> u16 {
+        self.content().len() as u16
     }
 }
 
@@ -98,7 +118,7 @@ impl Components {
             .map(|comp| {
                 let mut comp: Component = comp.into();
                 comp.build(width, posy);
-                posy += comp.content().len() as u16;
+                posy += comp.height();
                 comp
             })
             .collect();
@@ -112,11 +132,11 @@ impl Components {
         let mut posy = 0;
         for comp in self.items.iter_mut() {
             if self.width == new_width && comp.is_built() {
-                posy = comp.posy();
-                continue;
+                comp.set_posy(posy);
+            } else {
+                comp.build(new_width, posy);
             }
-            comp.build(new_width, posy);
-            posy += comp.content().len() as u16;
+            posy += comp.height();
         }
         self.width = new_width;
     }
@@ -128,6 +148,31 @@ impl Components {
     fn push_front(&mut self, new_items: impl DoubleEndedIterator<Item = ComponentKind>) {
         for comp in new_items.rev() {
             self.items.push_front(comp.into());
+        }
+    }
+
+    fn get(&self, index: usize) -> Option<&Component> {
+        self.items.get(index)
+    }
+
+    fn first(&self) -> &Component {
+        self.items.front().expect("No loaded components")
+    }
+
+    fn last(&self) -> &Component {
+        self.items.back().expect("No loaded components")
+    }
+
+    fn get_first_up_to(&self, last: u16, before: bool) -> Option<&Component> {
+        let index = self.items.partition_point(|comp| comp.get_posy() < last);
+        if before {
+            if index == 0 {
+                None
+            } else {
+                Some(&self.items[index - 1])
+            }
+        } else {
+            self.items.get(index)
         }
     }
 }
@@ -181,7 +226,8 @@ impl Geometry {
     }
 }
 
-// TODO: Consider adding first and last visible components
+// TODO: Add first_comp_index and last_comp_index
+//       (consider if textpad should be able to scroll by component)
 pub struct TextPad<'a> {
     components: Components,
     content: Vec<String>,
@@ -268,39 +314,16 @@ impl<'a> TextPad<'a> {
     }
 
     fn first_visible_comp(&self) -> &Component {
-        let mut first_comps = self
-            .components
-            .items
-            .iter()
-            .rev()
-            .skip_while(|comp| comp.posy() > self.first);
-        let first = first_comps.next().expect("No visible component found!");
-        if first.posy() == self.first {
-            first_comps.next().unwrap_or(first)
-        } else {
-            first
-        }
+        self.components
+            .get_first_up_to(self.first, true)
+            .unwrap_or(self.components.first())
     }
 
     fn last_visible_comp(&self) -> &Component {
         let term_heigth = self.geo.borrow().term_height;
-        let mut last_comps = self
-            .components
-            .items
-            .iter()
-            .skip_while(|comp| comp.posy() < self.first + term_heigth);
-        let last = last_comps.next().unwrap_or(
-            self.components
-                .items
-                .iter()
-                .last()
-                .expect("No loaded components"),
-        );
-        if last.posy() == self.first + term_heigth {
-            last_comps.next().unwrap_or(last)
-        } else {
-            last
-        }
+        self.components
+            .get_first_up_to(self.first + term_heigth, false)
+            .unwrap_or(self.components.last())
     }
 }
 

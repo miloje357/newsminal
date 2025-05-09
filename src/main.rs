@@ -35,6 +35,7 @@ enum Body {
     ToFetch { url: String },
 }
 
+// TODO: Consider seperating data and state fields
 // TODO: Add is_read: bool field
 // TODO: Add is_new: bool field
 #[derive(Serialize, Deserialize)]

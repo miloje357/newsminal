@@ -38,18 +38,18 @@ impl FeedControler<'_> {
         match dir {
             Direction::Up => {
                 let lines: i16 =
-                    self.textpad.first as i16 - self.textpad.first_visible_comp().posy() as i16;
+                    self.textpad.first as i16 - self.textpad.first_visible_comp().get_posy() as i16;
                 self.textpad.scroll_by_lines(&mut qc, -lines)?;
             }
             Direction::Down => {
                 let term_height = self.textpad.geo.borrow().term_height;
                 let last = self.textpad.last_visible_comp();
-                let mut lines: i16 =
-                    last.posy() as i16 - (self.textpad.first as i16 + term_height as i16);
+                let mut lines =
+                    (last.get_posy() + last.height()) - (self.textpad.first + term_height);
                 if lines == 0 {
-                    lines = last.content().len() as i16
+                    lines = last.height();
                 }
-                self.textpad.scroll_by_lines(&mut qc, lines)?;
+                self.textpad.scroll_by_lines(&mut qc, lines as i16)?;
             }
         }
         Ok(())
@@ -62,8 +62,12 @@ impl FeedControler<'_> {
         is_selected: bool,
     ) -> io::Result<()> {
         let startx = self.textpad.geo.borrow().startx;
-        let comp = &self.textpad.components.items[self.feed.selected];
-        qc.queue(cursor::MoveTo(startx, comp.posy() - self.textpad.first))?;
+        let comp = self
+            .textpad
+            .components
+            .get(self.feed.selected)
+            .expect("No components loaded");
+        qc.queue(cursor::MoveTo(startx, comp.get_posy() - self.textpad.first))?;
         for line in comp.content() {
             if is_selected {
                 qc.queue(style::PrintStyledContent(line.clone().red()))?;
@@ -74,6 +78,28 @@ impl FeedControler<'_> {
                 .queue(cursor::MoveToColumn(startx))?;
         }
         Ok(())
+    }
+
+    fn num_to_scroll_down(&self) -> usize {
+        let last_visible = self.textpad.last_visible_comp();
+        if Some(last_visible) == self.textpad.components.get(self.feed.selected) {
+            2
+        } else if Some(last_visible) == self.textpad.components.get(self.feed.selected + 1) {
+            1
+        } else {
+            0
+        }
+    }
+
+    fn num_to_scroll_up(&self) -> usize {
+        let first_visible = self.textpad.first_visible_comp();
+        if Some(first_visible) == self.textpad.components.get(self.feed.selected) {
+            2
+        } else if Some(first_visible) == self.textpad.components.get(self.feed.selected - 1) {
+            1
+        } else {
+            0
+        }
     }
 
     pub fn move_select(
@@ -87,10 +113,7 @@ impl FeedControler<'_> {
                 if self.feed.selected > 0 {
                     self.feed.selected -= 1;
                 }
-                if self.feed.selected > 0
-                    && self.textpad.first_visible_comp()
-                        == &self.textpad.components.items[self.feed.selected - 1]
-                {
+                if self.num_to_scroll_up() != 0 {
                     self.scroll(&mut qc, dir)?;
                 }
             }
@@ -98,13 +121,7 @@ impl FeedControler<'_> {
                 if self.feed.selected < self.feed.items.len() - 1 {
                     self.feed.selected += 1;
                 }
-                // BUG: Scrolls weirdly when end is reached
-                let last_visible = self.textpad.last_visible_comp();
-                if (self.feed.selected < self.feed.items.len() - 2
-                    && last_visible == &self.textpad.components.items[self.feed.selected + 2])
-                    || (self.feed.selected < self.feed.items.len() - 1
-                        && last_visible == &self.textpad.components.items[self.feed.selected + 1])
-                {
+                if self.num_to_scroll_down() != 0 {
                     self.scroll(&mut qc, dir)?;
                 }
             }
@@ -136,33 +153,19 @@ impl FeedControler<'_> {
             return Ok(false);
         }
         self.redraw_selected(&mut qc, false)?;
-        // TODO: Optimize
         let last_selected = self.feed.selected;
-        if let Some(selected) = self
+        self.feed.selected = self
             .textpad
             .components
             .items
-            .iter()
-            .position(|i| y + self.textpad.first < i.posy())
-        {
-            self.feed.selected = selected - 1;
-        }
-        // BUG: Doesn't work when you select a top out-of-bounds feeditem
-        if let Some(after_selected) = self
-            .textpad
-            .components
-            .items
-            .iter()
-            .skip(self.feed.selected + 1)
-            .next()
-        {
-            let last_at = after_selected.posy();
-            let last_line = self.textpad.first + geo.term_height;
-            if last_at > last_line {
+            .partition_point(|i| y + self.textpad.first >= i.get_posy() + i.height());
+        if self.feed.selected > last_selected {
+            for _ in 0..self.num_to_scroll_down() {
                 self.scroll(&mut qc, Direction::Down)?;
-                self.scroll(&mut qc, Direction::Down)?;
-            } else if last_at == last_line {
-                self.scroll(&mut qc, Direction::Down)?;
+            }
+        } else if self.feed.selected < last_selected {
+            for _ in 0..self.num_to_scroll_up() {
+                self.scroll(&mut qc, Direction::Up)?;
             }
         }
         self.redraw_selected(&mut qc, true)?;
@@ -197,7 +200,6 @@ impl FeedControler<'_> {
         if num_new == Some(0) {
             return Ok(());
         }
-        // BUG:
         if let Some(num_new) = num_new {
             let new_comps = self.feed.items.iter().take(num_new).map(|i| i.build());
             self.textpad.components.push_front(new_comps);
