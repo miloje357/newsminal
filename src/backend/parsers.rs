@@ -18,7 +18,6 @@ pub fn get_feed_items(
     client: &Client,
     parser: Rc<dyn NewsSite>,
     url: &'static str,
-    fmt: Option<&'static str>,
 ) -> Result<Vec<FeedItem>, Box<dyn Error>> {
     let rss = client.get(url).send()?;
     let rss = rss.error_for_status()?.bytes()?;
@@ -29,15 +28,7 @@ pub fn get_feed_items(
         .filter_map(|item| {
             Some(FeedItem {
                 title: format!("[{}] {}", parser, item.title()?),
-                published: {
-                    if let Some(fmt) = fmt {
-                        DateTime::parse_from_str(&item.pub_date()?, fmt)
-                            .ok()?
-                            .into()
-                    } else {
-                        DateTime::parse_from_rfc2822(&item.pub_date()?).ok()?.into()
-                    }
-                },
+                published: DateTime::parse_from_rfc2822(&item.pub_date()?).ok()?.into(),
                 at: None,
                 body: crate::Body::ToFetch {
                     url: item

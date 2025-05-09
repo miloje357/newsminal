@@ -17,7 +17,7 @@ impl Display for Danas {
 
 impl NewsSite for Danas {
     fn get_feed_items(&self, client: &Client) -> Result<Vec<FeedItem>, Box<dyn Error>> {
-        super::parsers::get_feed_items(client, Rc::new(Self), "https://danas.rs/feed", None)
+        super::parsers::get_feed_items(client, Rc::new(Self), "https://danas.rs/feed")
     }
 }
 

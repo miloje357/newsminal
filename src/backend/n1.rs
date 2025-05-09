@@ -15,12 +15,7 @@ impl Display for N1 {
 
 impl NewsSite for N1 {
     fn get_feed_items(&self, client: &Client) -> Result<Vec<FeedItem>, Box<dyn Error>> {
-        super::parsers::get_feed_items(
-            client,
-            Rc::new(Self),
-            "https://n1info.rs/feed",
-            Some("%a, %d %b %Y %H:%M:%S %:z"),
-        )
+        super::parsers::get_feed_items(client, Rc::new(Self), "https://n1info.rs/feed")
     }
 }
 
