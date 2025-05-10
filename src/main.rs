@@ -35,9 +35,6 @@ enum Body {
     ToFetch { url: String },
 }
 
-// TODO: Consider seperating data and state fields
-// TODO: Add is_read: bool field
-// TODO: Add is_new: bool field
 #[derive(Serialize, Deserialize)]
 pub struct FeedItem {
     title: String,
@@ -198,8 +195,7 @@ impl<'a> FeedControler<'a> {
             textpad,
             input: InputBuffer::new(),
         };
-        feed_controler.textpad.draw(&mut qc)?;
-        feed_controler.redraw_selected(&mut qc, true)?;
+        feed_controler.draw(&mut qc)?;
         qc.flush()?;
         Ok(feed_controler)
     }
@@ -225,7 +221,7 @@ impl Runnable for FeedControler<'_> {
         match self.input.map(event, View::Feed) {
             Some(Controls::Quit) => return Ok(false),
             Some(Controls::MoveSelect(dir)) => {
-                self.move_select(&mut qc, dir)?;
+                self.move_select(&mut qc, dir, true)?;
                 qc.flush()?;
             }
             Some(Controls::Resize(new_dimens)) => {

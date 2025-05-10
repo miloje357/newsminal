@@ -3,7 +3,7 @@ mod controllers;
 use crate::{ErrorWindow, FeedItem, View};
 use crossterm::{
     QueueableCommand, cursor,
-    style::{PrintStyledContent, Stylize},
+    style::{self, Color, ContentStyle, Stylize},
     terminal,
 };
 use std::{
@@ -23,9 +23,16 @@ pub enum ComponentKind {
 }
 
 #[derive(Debug, PartialEq)]
+struct ComponentContent {
+    lines: Vec<String>,
+    posy: u16,
+    style: Option<ContentStyle>,
+}
+
+#[derive(Debug, PartialEq)]
 enum ComponentState {
     ToBuild,
-    Built { lines: Vec<String>, posy: u16 },
+    Built(ComponentContent),
 }
 
 #[derive(Debug, PartialEq)]
@@ -50,16 +57,29 @@ impl Component {
             ComponentKind::Paragraph(text) => Paragraph::build(&text, width),
             ComponentKind::Boxed(text) => Boxed::build(&text.join("\n"), width),
         };
-        self.content = ComponentState::Built { lines, posy }
+        self.content = ComponentState::Built(ComponentContent {
+            lines,
+            posy,
+            style: None,
+        });
     }
 
-    fn content(&self) -> Vec<String> {
-        match &self.content {
+    fn content(&self, style: Option<ContentStyle>) -> Vec<String> {
+        let (lines, comp_style) = match &self.content {
             ComponentState::ToBuild => panic!(
                 "Couldn't get content because the component ({:#?}) wasn't built",
                 self
             ),
-            ComponentState::Built { lines, .. } => lines.clone(),
+            ComponentState::Built(content) => (content.lines.clone(), content.style),
+        };
+        let style = if style.is_some() { style } else { comp_style };
+        if let Some(style) = style {
+            lines
+                .iter()
+                .map(|line| style.apply(line).to_string())
+                .collect()
+        } else {
+            lines
         }
     }
 
@@ -69,22 +89,18 @@ impl Component {
                 "Couldn't get posy because the component ({:#?}) wasn't built",
                 self
             ),
-            ComponentState::Built { posy, .. } => *posy,
+            ComponentState::Built(content) => content.posy,
         }
     }
 
     fn set_posy(&mut self, new_posy: u16) {
-        match &self.content {
+        match &mut self.content {
             ComponentState::ToBuild => panic!(
                 "Couldn't set posy because the component ({:#?}) wasn't built",
                 self
             ),
-            // TODO: Probably better to add a method set_posy to ComponentState
-            ComponentState::Built { lines, .. } => {
-                self.content = ComponentState::Built {
-                    lines: lines.to_vec(),
-                    posy: new_posy,
-                }
+            ComponentState::Built(content) => {
+                content.posy = new_posy;
             }
         }
     }
@@ -94,7 +110,29 @@ impl Component {
     }
 
     fn height(&self) -> u16 {
-        self.content().len() as u16
+        self.content(None).len() as u16
+    }
+
+    fn get_style(&self) -> Option<ContentStyle> {
+        match &self.content {
+            ComponentState::ToBuild => panic!(
+                "Couldn't set posy because the component ({:#?}) wasn't built",
+                self
+            ),
+            ComponentState::Built(content) => content.style,
+        }
+    }
+
+    fn set_style(&mut self, new_style: ContentStyle) {
+        match &mut self.content {
+            ComponentState::ToBuild => panic!(
+                "Couldn't set posy because the component ({:#?}) wasn't built",
+                self
+            ),
+            ComponentState::Built(content) => {
+                content.style = Some(new_style);
+            }
+        }
     }
 }
 
@@ -142,7 +180,10 @@ impl Components {
     }
 
     fn to_lines(&self) -> Vec<String> {
-        self.items.iter().flat_map(|comp| comp.content()).collect()
+        self.items
+            .iter()
+            .flat_map(|comp| comp.content(None))
+            .collect()
     }
 
     fn push_front(&mut self, new_items: impl DoubleEndedIterator<Item = ComponentKind>) {
@@ -153,6 +194,10 @@ impl Components {
 
     fn get(&self, index: usize) -> Option<&Component> {
         self.items.get(index)
+    }
+
+    fn get_mut(&mut self, index: usize) -> Option<&mut Component> {
+        self.items.get_mut(index)
     }
 
     fn first(&self) -> &Component {
@@ -246,10 +291,18 @@ impl<'a> TextPad<'a> {
         }
     }
 
-    pub fn build(&mut self) {
+    pub fn build_components(&mut self) {
         let width = self.geo.borrow().width as usize;
         self.components.build(width);
+    }
+
+    pub fn reset_content(&mut self) {
         self.content = self.components.to_lines();
+    }
+
+    pub fn build(&mut self) {
+        self.build_components();
+        self.reset_content();
     }
 
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
@@ -415,6 +468,54 @@ impl Buildable for Boxed {
     }
 }
 
+enum FeedItemColor {
+    Read,
+    New,
+    NotNew,
+    Selected,
+    NotSelected,
+}
+
+impl FeedItemColor {
+    fn to_style(&self, prev_style: Option<ContentStyle>) -> Option<ContentStyle> {
+        match self {
+            FeedItemColor::Read => Some(ContentStyle::new().dim()),
+            FeedItemColor::New => Some(ContentStyle::new().blue()),
+            FeedItemColor::NotNew => {
+                if prev_style.and_then(|s| s.foreground_color) == Some(Color::Blue) {
+                    Some(ContentStyle::new())
+                } else {
+                    None
+                }
+            }
+            FeedItemColor::Selected => Some(ContentStyle::new().red()),
+            FeedItemColor::NotSelected => {
+                if prev_style.and_then(|s| s.foreground_color) == Some(Color::Red) {
+                    Some(ContentStyle::new())
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn set_style(comp: &mut Component, color: Self) -> Option<()> {
+        let prev_style = comp.get_style();
+        if let Some(new_style) = color.to_style(prev_style) {
+            comp.set_style(new_style);
+            return Some(());
+        }
+        None
+    }
+
+    fn get_styled(comp: &Component, color: Self) -> Vec<String> {
+        let prev_style = comp.get_style();
+        let new_style = color.to_style(prev_style);
+        comp.content(new_style)
+    }
+}
+
+// TODO: Do a custom impl Buildable for FeedItem
 impl FeedItem {
     pub fn build(&self) -> ComponentKind {
         let mut rows = vec![self.title.clone()];
@@ -432,13 +533,13 @@ impl ErrorWindow<'_> {
         let component = ComponentKind::Boxed(component);
         let mut component = Component::new(component);
         component.build(geo.width as usize, 0);
-        let lines = component.content();
+        let lines = component.content(Some(ContentStyle::new().red()));
 
         let starty = (geo.term_height - lines.len() as u16) / 2;
         qc.queue(terminal::Clear(terminal::ClearType::All))?
             .queue(cursor::MoveTo(geo.startx, starty))?;
         for line in lines {
-            qc.queue(PrintStyledContent(line.red()))?
+            qc.queue(style::Print(line.red()))?
                 .queue(cursor::MoveDown(1))?
                 .queue(cursor::MoveToColumn(geo.startx))?;
         }

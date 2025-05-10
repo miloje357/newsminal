@@ -3,16 +3,14 @@ use std::{
     time::Duration,
 };
 
-use crossterm::{
-    QueueableCommand, cursor, event,
-    style::{self, Stylize},
-    terminal,
-};
+use crossterm::{QueueableCommand, cursor, event, style, terminal};
 
 use crate::{
     ArticleControler, ErrorWindow, FeedControler, Runnable,
     input::{Direction, View},
 };
+
+use super::FeedItemColor;
 
 impl ArticleControler<'_> {
     pub fn scroll(
@@ -55,29 +53,38 @@ impl FeedControler<'_> {
         Ok(())
     }
 
-    // FIXME: Do with styled Components
-    pub fn redraw_selected(
+    fn redraw_selected(
         &self,
         mut qc: impl QueueableCommand + Write,
-        is_selected: bool,
+        color: FeedItemColor,
     ) -> io::Result<()> {
         let startx = self.textpad.geo.borrow().startx;
         let comp = self
             .textpad
             .components
             .get(self.feed.selected)
-            .expect("No components loaded");
+            .expect("Selected feeditem is not loaded");
         qc.queue(cursor::MoveTo(startx, comp.get_posy() - self.textpad.first))?;
-        for line in comp.content() {
-            if is_selected {
-                qc.queue(style::PrintStyledContent(line.clone().red()))?;
-            } else {
-                qc.queue(style::Print(line))?;
-            }
-            qc.queue(cursor::MoveDown(1))?
+        for line in FeedItemColor::get_styled(comp, color) {
+            qc.queue(style::Print(line))?
+                .queue(cursor::MoveDown(1))?
                 .queue(cursor::MoveToColumn(startx))?;
         }
         Ok(())
+    }
+
+    fn rebuild_selected(&mut self, color: FeedItemColor) {
+        let selected = self
+            .textpad
+            .components
+            .get_mut(self.feed.selected)
+            .expect("Selected not loaded");
+        let drawn_something = FeedItemColor::set_style(selected, color);
+        if drawn_something.is_some() {
+            // TODO: Consider writing a reset_content that appends to the textpad.content instead
+            //       of reseting it all
+            self.textpad.reset_content();
+        }
     }
 
     fn num_to_scroll_down(&self) -> usize {
@@ -106,8 +113,9 @@ impl FeedControler<'_> {
         &mut self,
         mut qc: impl QueueableCommand + Write,
         dir: Direction,
+        should_remove_new: bool,
     ) -> io::Result<()> {
-        self.redraw_selected(&mut qc, false)?;
+        self.redraw_selected(&mut qc, FeedItemColor::NotSelected)?;
         match dir {
             Direction::Up => {
                 if self.feed.selected > 0 {
@@ -126,13 +134,16 @@ impl FeedControler<'_> {
                 }
             }
         };
-        self.redraw_selected(&mut qc, true)?;
+        if should_remove_new {
+            self.rebuild_selected(FeedItemColor::NotNew);
+        }
+        self.redraw_selected(&mut qc, FeedItemColor::Selected)?;
         Ok(())
     }
 
     pub fn draw(&self, mut qc: impl QueueableCommand + Write) -> io::Result<()> {
         self.textpad.draw(&mut qc)?;
-        self.redraw_selected(&mut qc, true)?;
+        self.redraw_selected(&mut qc, FeedItemColor::Selected)?;
         Ok(())
     }
 
@@ -152,7 +163,7 @@ impl FeedControler<'_> {
         if x < 0 || x > geo.width as i16 {
             return Ok(false);
         }
-        self.redraw_selected(&mut qc, false)?;
+        self.redraw_selected(&mut qc, FeedItemColor::NotSelected)?;
         let last_selected = self.feed.selected;
         self.feed.selected = self
             .textpad
@@ -168,7 +179,8 @@ impl FeedControler<'_> {
                 self.scroll(&mut qc, Direction::Up)?;
             }
         }
-        self.redraw_selected(&mut qc, true)?;
+        self.rebuild_selected(FeedItemColor::NotNew);
+        self.redraw_selected(&mut qc, FeedItemColor::Selected)?;
         Ok(self.feed.selected == last_selected)
     }
 
@@ -203,11 +215,16 @@ impl FeedControler<'_> {
         if let Some(num_new) = num_new {
             let new_comps = self.feed.items.iter().take(num_new).map(|i| i.build());
             self.textpad.components.push_front(new_comps);
-            self.textpad.build();
+            self.textpad.build_components();
+            for comp in self.textpad.components.items.iter_mut().take(num_new) {
+                FeedItemColor::set_style(comp, FeedItemColor::New);
+            }
+            self.textpad.reset_content();
             for _ in 0..num_new {
-                self.move_select(&mut qc, Direction::Down)?;
+                self.move_select(&mut qc, Direction::Down, false)?;
             }
         }
+        // TODO: Consider writing a more optimized draw for this situtation
         Ok(())
     }
 
@@ -225,6 +242,7 @@ impl FeedControler<'_> {
             .run(&mut qc)?,
         }
         self.textpad.geo.borrow_mut().change_view(View::Feed);
+        self.rebuild_selected(FeedItemColor::Read);
         // FIXME: Add self.textpad.resize();
         self.draw(&mut qc)?;
         Ok(())
