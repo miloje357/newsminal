@@ -5,7 +5,9 @@ use reqwest::blocking::Client;
 use scraper::{ElementRef, Html};
 use serde::Deserialize;
 
-use crate::{Body, FeedItem, frontend::Components};
+use crate::Body;
+use crate::FeedItem;
+use crate::frontend::ComponentKind;
 
 use super::{BackendError, NewsSite, parsers::Parser};
 
@@ -51,7 +53,6 @@ impl NewsSite for Insajder {
                     .unwrap()
                     .and_local_timezone(Local)
                     .unwrap(),
-                at: None,
                 body: Body::Fetched {
                     html: i.body,
                     lead: i.lead,
@@ -63,16 +64,16 @@ impl NewsSite for Insajder {
 }
 
 impl Parser for Insajder {
-    fn parse_article_content(&self, elem: ElementRef) -> Option<Components> {
+    fn parse_article_content(&self, elem: ElementRef) -> Option<ComponentKind> {
         let text = elem.text().collect::<String>();
         match elem.value().name() {
-            "p" => Some(Components::Paragraph(text)),
-            "h2" => Some(Components::Subtitle(text)),
+            "p" => Some(ComponentKind::Paragraph(text)),
+            "h2" => Some(ComponentKind::Subtitle(text)),
             _ => None,
         }
     }
 
-    fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError> {
+    fn parse_article(&self, html: Html) -> Result<Vec<ComponentKind>, BackendError> {
         let body = html
             .root_element()
             .child_elements()

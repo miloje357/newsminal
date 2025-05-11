@@ -1,7 +1,7 @@
 use std::{error::Error, fmt::Display, rc::Rc};
 
 use super::{BackendError, FeedItem, NewsSite, Parser};
-use crate::frontend::Components;
+use crate::frontend::ComponentKind;
 use reqwest::blocking::Client;
 use scraper::{CaseSensitivity::CaseSensitive, ElementRef, Html};
 
@@ -20,13 +20,13 @@ impl NewsSite for N1 {
 }
 
 impl Parser for N1 {
-    fn parse_article_content(&self, elem: ElementRef) -> Option<Components> {
+    fn parse_article_content(&self, elem: ElementRef) -> Option<ComponentKind> {
         let text: String = elem.text().collect::<String>().trim().into();
         if text.is_empty() {
             return None;
         }
         if elem.value().name() == "p" {
-            return Some(Components::Lead(text));
+            return Some(ComponentKind::Lead(text));
         }
 
         if elem.value().name() != "div" {
@@ -56,17 +56,17 @@ impl Parser for N1 {
         };
 
         if grandchild.value().name() == "h2" {
-            Some(Components::Subtitle(text))
+            Some(ComponentKind::Subtitle(text))
         } else if grandchild.value().has_class("twitter-tweet", CaseSensitive) {
-            Some(Components::Boxed(
+            Some(ComponentKind::Boxed(
                 grandchild.text().map(|line| line.to_string()).collect(),
             ))
         } else {
-            Some(Components::Paragraph(text))
+            Some(ComponentKind::Paragraph(text))
         }
     }
 
-    fn parse_article(&self, html: Html) -> Result<Vec<Components>, BackendError> {
+    fn parse_article(&self, html: Html) -> Result<Vec<ComponentKind>, BackendError> {
         super::parsers::parse_article(Rc::new(Self), html, ".article-wrapper")
     }
 }
